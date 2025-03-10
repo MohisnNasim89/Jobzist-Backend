@@ -3,7 +3,7 @@ const dotenv = require("dotenv");
 const cors = require("cors");
 const morgan = require("morgan");
 const helmet = require("helmet");
-const mongoose = require("mongoose");
+const connectDB = require("./src/config/mongoConfig");
 
 dotenv.config();
 const app = express();
@@ -18,12 +18,12 @@ app.get("/", (req, res) => {
   res.send("Jobzist Backend is Running 🚀");
 });
 
-mongoose
-  .connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => console.log("MongoDB Connected ✅"))
-  .catch((err) => console.log("MongoDB Connection Error:", err));
-
-const PORT = process.env.PORT;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Connect to MongoDB using the function from mongoConfig.js
+connectDB()
+  .then(() => {
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  })
+  .catch((err) => console.error("Failed to connect to MongoDB:", err));
