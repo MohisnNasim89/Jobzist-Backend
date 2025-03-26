@@ -5,7 +5,7 @@ const employerSchema = new mongoose.Schema({
   fullName: { type: String, required: true },
   roleType: { type: String, enum: ["Company_Employer", "Independent_Recruiter"], default: "Independent_Recruiter" },
   companyId: { type: mongoose.Schema.Types.ObjectId, ref: "Company", default: null },
-  companyName: { type: String, required: function() { return !this.companyId; } }, 
+  companyName: { type: String, required: function () { return !this.companyId; } },
   phoneNumber: { type: String },
   jobListings: [{ type: mongoose.Schema.Types.ObjectId, ref: "Job" }],
   hiredCandidates: [{ type: mongoose.Schema.Types.ObjectId, ref: "JobSeeker" }],
