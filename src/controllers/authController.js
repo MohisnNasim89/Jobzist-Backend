@@ -4,7 +4,6 @@ const bcrypt = require("bcryptjs");
 const User = require("../models/users/Users");
 require("dotenv").config();
 
-/** Generate JWT Token */
 const generateToken = (userId, role) => {
   return jwt.sign({ userId, role }, process.env.JWT_SECRET, { expiresIn: "7d" });
 };
@@ -85,6 +84,20 @@ exports.oauthLogin = async (req, res) => {
     const token = generateToken(user.authId, user.role);
 
     return res.status(200).json({ message: "OAuth login successful", token });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+/** @desc Forgot Password (Send Reset Link) */
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: "Email is required" });
+
+    const resetLink = await admin.auth().generatePasswordResetLink(email);
+
+    return res.status(200).json({ message: "Password reset link sent to email: ", resetLink });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
