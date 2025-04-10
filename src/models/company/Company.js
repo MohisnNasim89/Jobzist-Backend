@@ -1,3 +1,4 @@
+// src/models/company/Company.js
 const mongoose = require("mongoose");
 const { applySoftDelete } = require("../../utils/softDelete");
 
@@ -24,6 +25,12 @@ const companySchema = new mongoose.Schema(
     },
     admins: [{ type: mongoose.Schema.Types.ObjectId, ref: "CompanyAdmin" }],
     employees: [{ type: mongoose.Schema.Types.ObjectId, ref: "Employer" }],
+    jobListings: [
+      {
+        jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job" },
+        postedAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true }
 );
@@ -38,5 +45,6 @@ companySchema.pre("save", function (next) {
 companySchema.index({ "profile.name": 1 });
 companySchema.index({ admins: 1 });
 companySchema.index({ employees: 1 });
+companySchema.index({ jobListings: 1 });
 
 module.exports = mongoose.model("Company", companySchema);

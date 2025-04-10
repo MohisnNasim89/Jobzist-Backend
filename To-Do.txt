@@ -1,0 +1,9 @@
+Add more user routes 
+rename previous routes
+add job routes
+organize job controller on the basis of its functionality 
+
+
+
+cosistent routes 
+Id's should be in the params for all routes when ever needed

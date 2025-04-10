@@ -1,9 +1,14 @@
+// src/routes/userRoutes.js
 const express = require("express");
-const router = express.Router();
+const { userIdValidationRules, updateProfileValidationRules, validate } = require("../validations/userValidation");
 const { verifyToken } = require("../middlewares/authMiddleware");
-const { updateUserProfile, deleteUser } = require("../controllers/userController");
+const { updateUserProfile, deleteUser, getCurrentUser } = require("../controllers/userController");
 
-router.put("/profile", verifyToken, updateUserProfile);
-router.delete("/account", verifyToken, deleteUser);
+const router = express.Router();
+
+// Routes
+router.get("/:userId", verifyToken, userIdValidationRules, validate, getCurrentUser);
+router.put("/:userId", verifyToken, userIdValidationRules, updateProfileValidationRules, validate, updateUserProfile);
+router.delete("/:userId", verifyToken, userIdValidationRules, validate, deleteUser);
 
 module.exports = router;

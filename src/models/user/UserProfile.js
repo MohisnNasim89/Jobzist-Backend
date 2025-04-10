@@ -16,7 +16,12 @@ const userProfileSchema = new mongoose.Schema(
       country: { type: String, default: null },
       city: { type: String, default: null },
     },
-    phoneNumber: { type: String, default: null },
+    phoneNumber: {
+      type: String,
+      trim: true,
+      match: [/^\+?[1-9]\d{1,14}$/, "Please enter a valid phone number (e.g., +1234567890)"],
+      default: null,
+    },
     socialLinks: [
       {
         platform: { type: String, enum: ["LinkedIn", "Twitter", "GitHub", "Portfolio"], required: true },
