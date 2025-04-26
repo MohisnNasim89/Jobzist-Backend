@@ -6,7 +6,7 @@ const CompanyAdmin = require("../models/user/CompanyAdmin");
 
 exports.createJob = async (req, res) => {
   try {
-    const userId = req.user.mongoId;
+    const userId = req.user.userId;
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -122,7 +122,7 @@ exports.createJob = async (req, res) => {
 
 exports.updateJob = async (req, res) => {
   try {
-    const userId = req.user.mongoId;
+    const userId = req.user.userId;
     const jobId = req.params.jobId;
     const updates = req.body;
 
@@ -184,7 +184,7 @@ exports.updateJob = async (req, res) => {
 
 exports.deleteJob = async (req, res) => {
   try {
-    const userId = req.user.mongoId;
+    const userId = req.user.userId;
     const jobId = req.params.jobId;
 
     const job = await Job.findById(jobId);
@@ -310,7 +310,7 @@ exports.getAllJobs = async (req, res) => {
 
 exports.applyForJob = async (req, res) => {
   try {
-    const userId = req.user.mongoId;
+    const userId = req.user.userId;
     const jobId = req.params.jobId;
 
     const user = await User.findById(userId);
@@ -356,7 +356,7 @@ exports.applyForJob = async (req, res) => {
 
 exports.saveJob = async (req, res) => {
   try {
-    const userId = req.user.mongoId;
+    const userId = req.user.userId;
     const jobId = req.params.jobId;
 
     const user = await User.findById(userId);
@@ -395,7 +395,7 @@ exports.saveJob = async (req, res) => {
 
 exports.getSavedJobs = async (req, res) => {
   try {
-    const userId = req.user.mongoId;
+    const userId = req.user.userId;
 
     const user = await User.findById(userId);
     if (!user) {
@@ -447,7 +447,7 @@ exports.getSavedJobs = async (req, res) => {
 
 exports.getAppliedJobs = async (req, res) => {
   try {
-    const userId = req.user.mongoId;
+    const userId = req.user.userId;
 
     const user = await User.findById(userId);
     if (!user) {
@@ -499,7 +499,7 @@ exports.getAppliedJobs = async (req, res) => {
 
 exports.hireCandidate = async (req, res) => {
   try {
-    const userId = req.user.mongoId;
+    const userId = req.user.userId;
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "User not found" });

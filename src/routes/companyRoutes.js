@@ -12,11 +12,10 @@ const {
 const {
   companyValidationRules, 
   companyIdValidationRules, 
-  validate} = require("../middlewares/validationMiddleware");
-
+  validate} = require("../middlewares/schemaValidation/companyValidation");
 router.post("/create", verifyToken, companyValidationRules, validate, createCompany);
 router.get("/:companyId/profile", companyIdValidationRules, validate, getCompanyProfile);
-router.put("/:companyId/profile", verifyToken, companyIdValidationRules, companyValidationRules, validate, updateCompanyProfile);
-router.delete("/:companyId", verifyToken, companyIdValidationRules, validate, deleteCompany);
+router.put("/:companyId/update-profile", verifyToken, companyIdValidationRules, companyValidationRules, validate, updateCompanyProfile);
+router.delete("/:companyId/deactivate", verifyToken, companyIdValidationRules, validate, deleteCompany);
 
 module.exports = router;

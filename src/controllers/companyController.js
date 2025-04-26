@@ -25,7 +25,7 @@ exports.createCompany = async (req, res) => {
     });
     await company.save();
 
-    const companyAdmin = await CompanyAdmin.findOne({ userId: user.mongoId });
+    const companyAdmin = await CompanyAdmin.findOne({ userId: user.userId });
     companyAdmin.companyId = company._id;
     await companyAdmin.save();
 
@@ -79,7 +79,7 @@ exports.updateCompanyProfile = async (req, res) => {
       return res.status(404).json({ message: "Company not found" });
     }
 
-    const companyAdmin = await CompanyAdmin.findOne({ userId: user.mongoId });
+    const companyAdmin = await CompanyAdmin.findOne({ userId: user.userId });
     if (!companyAdmin || companyAdmin.companyId.toString() !== companyId.toString()) {
       return res.status(403).json({ message: "Unauthorized: You are not an admin of this company" });
     }
@@ -124,7 +124,7 @@ exports.deleteCompany = async (req, res) => {
       return res.status(404).json({ message: "Company not found" });
     }
 
-    const companyAdmin = await CompanyAdmin.findOne({ userId: user.mongoId });
+    const companyAdmin = await CompanyAdmin.findOne({ userId: user.userId });
     if (!companyAdmin || companyAdmin.companyId.toString() !== companyId.toString()) {
       return res.status(403).json({ message: "Unauthorized: You are not an admin of this company" });
     }

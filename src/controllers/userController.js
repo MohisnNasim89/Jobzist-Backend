@@ -6,7 +6,7 @@ const renderProfile = require("../utils/renderProfile");
 exports.getCurrentUser = async (req, res) => {
   try {
     const userId = req.params.userId;
-    const authenticatedUserId = req.user.mongoId;
+    const authenticatedUserId = req.user.userId;
 
     // Ensure the userId in the route matches the authenticated user
     if (userId !== authenticatedUserId) {
@@ -39,7 +39,7 @@ exports.getCurrentUser = async (req, res) => {
 exports.updateUserProfile = async (req, res) => {
   try {
     const userId = req.params.userId;
-    const authenticatedUserId = req.user.mongoId;
+    const authenticatedUserId = req.user.userId;
 
     // Ensure the userId in the route matches the authenticated user
     if (userId !== authenticatedUserId) {
@@ -159,7 +159,7 @@ exports.updateUserProfile = async (req, res) => {
 exports.deleteUser = async (req, res) => {
   try {
     const userId = req.params.userId;
-    const authenticatedUserId = req.user.mongoId;
+    const authenticatedUserId = req.user.userId;
 
     // Ensure the userId in the route matches the authenticated user
     if (userId !== authenticatedUserId) {

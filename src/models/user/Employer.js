@@ -25,7 +25,7 @@ const employerSchema = new mongoose.Schema(
     companyName: {
       type: String,
       required: function () {
-        return this.roleType === "Independent Recruiter" && !this.companyId;
+        return this.roleType === "Company Employer";
       },
       trim: true,
     },

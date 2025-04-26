@@ -3,12 +3,12 @@ const User = require("../models/user/Users");
 const UserProfile = require("../models/user/UserProfile");
 const JobSeeker = require("../models/user/JobSeeker");
 const Company = require("../models/company/Company");
-const CompanyAdmin = require("../models/user/CompanyAdmin");
+const CompanyAdmin = require("../models/company/CompanyAdmin");
 
 exports.uploadProfilePic = async (req, res) => {
   try {
     const userId = req.params.userId;
-    const authenticatedUserId = req.user.mongoId;
+    const authenticatedUserId = req.user.userId;
 
     // Ensure the userId in the route matches the authenticated user
     if (userId !== authenticatedUserId) {
@@ -68,7 +68,7 @@ exports.uploadProfilePic = async (req, res) => {
 exports.uploadResume = async (req, res) => {
   try {
     const userId = req.params.userId;
-    const authenticatedUserId = req.user.mongoId;
+    const authenticatedUserId = req.user.userId;
 
     // Ensure the userId in the route matches the authenticated user
     if (userId !== authenticatedUserId) {

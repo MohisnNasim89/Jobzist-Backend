@@ -1,11 +1,13 @@
 // src/routes/uploadRoutes.js
 const express = require("express");
 const upload = require("../config/multerConfig");
+
 const {
   userIdValidationRules,
   companyIdValidationRules,
   validate,
-} = require("../validations/uploadValidation");
+} = require("../middlewares/schemaValidation/uploadValidation");
+
 const { verifyToken } = require("../middlewares/authMiddleware");
 const { uploadProfilePic, uploadResume } = require("../controllers/uploadController");
 
