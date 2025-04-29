@@ -12,7 +12,7 @@ const {
     loginValidationRules,
     oauthValidationRules,
     forgotPasswordValidationRules, 
-    validate } = require("../middlewares/schemaValidation/authValidation");
+    validate } = require("../validations/authValidation");
 
 const { verifyToken } = require("../middlewares/authMiddleware");
 

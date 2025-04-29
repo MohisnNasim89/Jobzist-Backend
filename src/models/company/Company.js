@@ -1,50 +1,42 @@
-// src/models/company/Company.js
 const mongoose = require("mongoose");
 const { applySoftDelete } = require("../../utils/softDelete");
 
+const locationSchema = new mongoose.Schema({
+  country: { type: String, required: true },
+  city: { type: String, required: true },
+  address: { type: String, required: true },
+});
+
+const socialLinkSchema = new mongoose.Schema({
+  platform: { type: String, required: true },
+  url: { type: String, required: true },
+});
+
+const jobListingSchema = new mongoose.Schema({
+  jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true },
+});
+
 const companySchema = new mongoose.Schema(
   {
-    profile: {
-      name: { type: String, required: true, trim: true, unique: true },
-      logo: { type: String, default: null },
-      industry: { type: String, required: true, trim: true },
-      location: {
-        country: { type: String, required: true },
-        city: { type: String, required: true },
-        address: { type: String, default: null },
-      },
-      website: { type: String },
-      description: { type: String, maxlength: 500 },
-      companySize: {
-        type: String,
-        enum: ["Startup", "Small", "Medium", "Large", "Enterprise"],
-        default: "Small",
-      },
-      foundedYear: { type: Number, min: 1800, max: new Date().getFullYear() },
-      socialLinks: [{ platform: String, url: String }],
+    name: { type: String, required: true },
+    industry: { type: String, required: true },
+    location: { type: locationSchema, required: true },
+    website: { type: String },
+    description: { type: String },
+    companySize: {
+      type: String,
+      enum: ["Startup", "Small", "Medium", "Large", "Enterprise"],
+      required: true,
     },
-    admins: [{ type: mongoose.Schema.Types.ObjectId, ref: "CompanyAdmin" }],
-    employees: [{ type: mongoose.Schema.Types.ObjectId, ref: "Employer" }],
-    jobListings: [
-      {
-        jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job" },
-        postedAt: { type: Date, default: Date.now },
-      },
-    ],
+    foundedYear: { type: Number, required: true },
+    socialLinks: [socialLinkSchema],
+    logo: { type: String },
+    jobListings: [jobListingSchema], // Added jobListings
   },
   { timestamps: true }
 );
 
+// Apply soft delete middleware
 applySoftDelete(companySchema);
-
-companySchema.pre("save", function (next) {
-  this.updatedAt = Date.now();
-  next();
-});
-
-companySchema.index({ "profile.name": 1 });
-companySchema.index({ admins: 1 });
-companySchema.index({ employees: 1 });
-companySchema.index({ jobListings: 1 });
 
 module.exports = mongoose.model("Company", companySchema);

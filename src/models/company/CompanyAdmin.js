@@ -4,7 +4,7 @@ const { applySoftDelete } = require("../../utils/softDelete");
 
 const companyAdminSchema = new mongoose.Schema(
   {
-    userId: {
+    mongoId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
@@ -13,7 +13,6 @@ const companyAdminSchema = new mongoose.Schema(
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Company",
-      required: [true, "Company ID is required for a Company Admin"],
     },
     permissions: {
       type: [String],

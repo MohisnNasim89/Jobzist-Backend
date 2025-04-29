@@ -1,10 +1,19 @@
-// src/models/user/Employer.js
 const mongoose = require("mongoose");
 const { applySoftDelete } = require("../../utils/softDelete");
 
+const jobListingSchema = new mongoose.Schema({
+  jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true },
+});
+
+const hiredCandidateSchema = new mongoose.Schema({
+  jobSeekerId: { type: mongoose.Schema.Types.ObjectId, ref: "JobSeeker", required: true },
+  jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true },
+  hiredAt: { type: Date, default: Date.now },
+});
+
 const employerSchema = new mongoose.Schema(
   {
-    userId: {
+    mongoId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
@@ -29,19 +38,8 @@ const employerSchema = new mongoose.Schema(
       },
       trim: true,
     },
-    jobListings: [
-      {
-        jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job" },
-        postedAt: { type: Date, default: Date.now },
-      },
-    ],
-    hiredCandidates: [
-      {
-        jobSeekerId: { type: mongoose.Schema.Types.ObjectId, ref: "JobSeeker" },
-        jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job" },
-        hiredAt: { type: Date, default: Date.now },
-      },
-    ],
+    jobListings: [jobListingSchema],
+    hiredCandidates: [hiredCandidateSchema],
     status: {
       type: String,
       enum: ["Active", "Inactive", "Fired"],

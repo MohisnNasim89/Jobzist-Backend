@@ -1,4 +1,3 @@
-// src/controllers/uploadController.js
 const User = require("../models/user/Users");
 const UserProfile = require("../models/user/UserProfile");
 const JobSeeker = require("../models/user/JobSeeker");
@@ -25,13 +24,13 @@ exports.uploadProfilePic = async (req, res) => {
       return res.status(400).json({ message: "Invalid file type. Allowed types: image/jpeg, image/png" });
     }
 
-    const user = await User.findById(userId);
-    if (!user || user.isDeleted) {
+    const user = await User.findOne({ _id: userId, isDeleted: false });
+    if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
     // Update UserProfile with the profile picture URL
-    const userProfile = await UserProfile.findOne({ userId });
+    const userProfile = await UserProfile.findOne({ userId, isDeleted: false });
     if (!userProfile) {
       return res.status(404).json({ message: "User profile not found" });
     }
@@ -41,17 +40,17 @@ exports.uploadProfilePic = async (req, res) => {
 
     // If the user is a company admin and a companyId is provided, update the company logo
     if (user.role === "company_admin" && req.body.companyId) {
-      const company = await Company.findById(req.body.companyId);
+      const company = await Company.findOne({ _id: req.body.companyId, isDeleted: false });
       if (!company) {
         return res.status(404).json({ message: "Company not found" });
       }
 
-      const companyAdmin = await CompanyAdmin.findOne({ userId });
+      const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false });
       if (!companyAdmin || companyAdmin.companyId.toString() !== req.body.companyId.toString()) {
         return res.status(403).json({ message: "Unauthorized: You are not an admin of this company" });
       }
 
-      company.profile.logo = req.file.path;
+      company.logo = req.file.path; // Fixed: Removed incorrect profile nesting
       await company.save();
     }
 
@@ -85,8 +84,8 @@ exports.uploadResume = async (req, res) => {
       return res.status(400).json({ message: "Invalid file type. Allowed type: application/pdf" });
     }
 
-    const user = await User.findById(userId);
-    if (!user || user.isDeleted) {
+    const user = await User.findOne({ _id: userId, isDeleted: false });
+    if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
@@ -94,7 +93,7 @@ exports.uploadResume = async (req, res) => {
       return res.status(403).json({ message: "Only job seekers can upload a resume" });
     }
 
-    const jobSeeker = await JobSeeker.findOne({ userId });
+    const jobSeeker = await JobSeeker.findOne({ userId, isDeleted: false });
     if (!jobSeeker) {
       return res.status(404).json({ message: "Job seeker profile not found" });
     }

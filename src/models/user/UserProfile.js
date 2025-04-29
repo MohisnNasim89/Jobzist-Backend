@@ -3,7 +3,7 @@ const { applySoftDelete } = require("../../utils/softDelete");
 
 const userProfileSchema = new mongoose.Schema(
   {
-    userId: {
+    mongoId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
@@ -44,6 +44,6 @@ userProfileSchema.pre("save", function (next) {
   next();
 });
 
-userProfileSchema.index({ userId: 1 });
+userProfileSchema.index({ mongoId: 1 });
 
 module.exports = mongoose.model("UserProfile", userProfileSchema);

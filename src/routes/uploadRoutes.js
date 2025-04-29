@@ -6,7 +6,7 @@ const {
   userIdValidationRules,
   companyIdValidationRules,
   validate,
-} = require("../middlewares/schemaValidation/uploadValidation");
+} = require("../validations/uploadValidation");
 
 const { verifyToken } = require("../middlewares/authMiddleware");
 const { uploadProfilePic, uploadResume } = require("../controllers/uploadController");

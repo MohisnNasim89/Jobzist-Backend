@@ -1,10 +1,40 @@
-// src/models/user/JobSeeker.js
 const mongoose = require("mongoose");
 const { applySoftDelete } = require("../../utils/softDelete");
 
+const educationSchema = new mongoose.Schema({
+  degree: { type: String, required: true },
+  institution: { type: String, required: true },
+  startYear: { type: Number, required: true },
+  endYear: { type: Number },
+});
+
+const experienceSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  company: { type: String, required: true },
+  startDate: { type: Date, required: true },
+  endDate: { type: Date },
+  description: { type: String },
+});
+
+const jobPreferencesSchema = new mongoose.Schema({
+  jobType: { type: String, enum: ["Full-Time", "Part-Time", "Contract", "Internship"] },
+  location: { type: String },
+  salaryExpectation: { type: Number },
+});
+
+const appliedJobSchema = new mongoose.Schema({
+  jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true },
+  appliedAt: { type: Date, default: Date.now },
+});
+
+const savedJobSchema = new mongoose.Schema({
+  jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true },
+  savedAt: { type: Date, default: Date.now },
+});
+
 const jobSeekerSchema = new mongoose.Schema(
   {
-    userId: {
+    mongoId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
@@ -18,50 +48,11 @@ const jobSeekerSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
-    education: [
-      {
-        degree: { type: String, required: true },
-        fieldOfStudy: { type: String, required: true },
-        institute: { type: String, required: true },
-        grade: { type: String, default: null },
-        startDate: { type: Date, required: true },
-        endDate: { type: Date, default: null },
-      },
-    ],
-    experience: [
-      {
-        companyId: { type: mongoose.Schema.Types.ObjectId, ref: "Company", default: null },
-        companyName: { type: String },
-        title: { type: String, required: true },
-        startDate: { type: Date, required: true },
-        endDate: { type: Date, default: null },
-        isCurrentJob: { type: Boolean, default: false },
-        description: { type: String, default: "" },
-      },
-    ],
-    jobPreferences: {
-      jobType: {
-        type: [String],
-        enum: ["Full-Time", "Part-Time", "Contract", "Internship", "Freelance", "Remote"],
-        default: [],
-      },
-      location: {
-        country: { type: String, default: null },
-        city: { type: String, default: null },
-      },
-    },
-    appliedJobs: [
-      {
-        jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job" },
-        appliedAt: { type: Date, default: Date.now },
-      },
-    ],
-    savedJobs: [
-      {
-        jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job" },
-        savedAt: { type: Date, default: Date.now },
-      },
-    ],
+    education: [educationSchema],
+    experience: [experienceSchema],
+    jobPreferences: jobPreferencesSchema,
+    appliedJobs: [appliedJobSchema],
+    savedJobs: [savedJobSchema],
     status: {
       type: String,
       enum: ["Open to Work", "Not Looking", "Hired"],

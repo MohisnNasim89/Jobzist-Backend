@@ -85,9 +85,9 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: "Email and password are required" });
     }
 
-    const user = await User.findOne({ email })
-      .populate("profileId")
-      .populate("roleSpecificData");
+    const user = await User.findOne({ email, isDeleted: false })
+      .populate({ path: "profileId", match: { isDeleted: false } })
+      .populate({ path: "roleSpecificData", match: { isDeleted: false } });
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -102,7 +102,14 @@ exports.login = async (req, res) => {
     try {
       profileData = renderProfile(user, "user");
     } catch (error) {
-      return res.status(404).json({ message: error.message });
+      console.error("Error rendering profile:", error);
+      profileData = {
+        authId: user.authId,
+        email: user.email,
+        role: user.role,
+        profile: user.profileId || {},
+        roleSpecificData: user.roleSpecificData || {},
+      };
     }
 
     return res.status(200).json({
@@ -128,7 +135,7 @@ exports.oauthLogin = async (req, res) => {
 
     const decodedToken = await admin.auth().verifyIdToken(idToken);
 
-    let user = await User.findOne({ authId: decodedToken.uid });
+    let user = await User.findOne({ authId: decodedToken.uid, isDeleted: false });
     let isNewUser = false;
 
     if (!user) {
@@ -155,16 +162,23 @@ exports.oauthLogin = async (req, res) => {
       await roleSpecificData.save();
     }
 
-    user = await User.findOne({ authId: decodedToken.uid })
-      .populate("profileId")
-      .populate("roleSpecificData");
+    user = await User.findOne({ authId: decodedToken.uid, isDeleted: false })
+      .populate({ path: "profileId", match: { isDeleted: false } })
+      .populate({ path: "roleSpecificData", match: { isDeleted: false } });
 
     const token = generateToken(user._id.toString(), user.role);
     let profileData;
     try {
       profileData = renderProfile(user, "user");
     } catch (error) {
-      return res.status(404).json({ message: error.message });
+      console.error("Error rendering profile:", error);
+      profileData = {
+        authId: user.authId,
+        email: user.email,
+        role: user.role,
+        profile: user.profileId || {},
+        roleSpecificData: user.roleSpecificData || {},
+      };
     }
 
     return res.status(200).json({
@@ -183,9 +197,17 @@ exports.forgotPassword = async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ message: "Email is required" });
 
+    const user = await User.findOne({ email, isDeleted: false });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
     const resetLink = await admin.auth().generatePasswordResetLink(email);
     return res.status(200).json({ message: "Password reset link sent", resetLink });
   } catch (error) {
+    if (error.code === "auth/user-not-found") {
+      return res.status(404).json({ message: "User not found" });
+    }
     console.error("Error in forgotPassword:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
