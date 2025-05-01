@@ -13,6 +13,7 @@ const userRoutes = require("./src/routes/profile/userProfileRoutes");
 const companyRoutes = require("./src/routes/profile/companyProfileRoutes");
 const uploadRoutes = require("./src/routes/uploadRoutes");
 const jobRoutes = require("./src/routes/job/jobRoutes");
+const postRoutes = require("./src/routes/post/postRoutes");
 
 dotenv.config();
 const app = express();
@@ -32,6 +33,7 @@ app.use("/api/user", userRoutes);
 app.use("/api/company", companyRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/job", jobRoutes);
+app.use("/api/post", postRoutes);
 
 // Root Route
 app.get("/", (req, res) => {

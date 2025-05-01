@@ -3,7 +3,7 @@ const { applySoftDelete } = require("../../utils/softDelete");
 
 const superAdminSchema = new mongoose.Schema(
   {
-    mongoId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, unique: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, unique: true },
     permissions: {
       type: [String],
       enum: [

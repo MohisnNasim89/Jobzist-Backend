@@ -1,3 +1,0 @@
-1. When we deactivate an account it is soft deleted form mongoDB but not deleted from Firebase...
-so when the user with the same email request register again it doesn't register and give email already exists error
-

@@ -13,7 +13,7 @@ const hiredCandidateSchema = new mongoose.Schema({
 
 const employerSchema = new mongoose.Schema(
   {
-    mongoId: {
+    userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
@@ -49,7 +49,6 @@ const employerSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Apply soft delete middleware
 applySoftDelete(employerSchema);
 
 module.exports = mongoose.model("Employer", employerSchema);

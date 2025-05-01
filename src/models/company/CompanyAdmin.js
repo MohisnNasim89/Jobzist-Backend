@@ -1,10 +1,9 @@
-// src/models/user/CompanyAdmin.js
 const mongoose = require("mongoose");
 const { applySoftDelete } = require("../../utils/softDelete");
 
 const companyAdminSchema = new mongoose.Schema(
   {
-    mongoId: {
+    userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
@@ -43,7 +42,6 @@ const companyAdminSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Apply soft delete middleware
 applySoftDelete(companyAdminSchema);
 
 module.exports = mongoose.model("CompanyAdmin", companyAdminSchema);

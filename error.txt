@@ -1,2 +1,0 @@
-fix the user profile controller for company admin
-add a new route create profile 

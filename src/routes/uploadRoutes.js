@@ -1,6 +1,5 @@
-// src/routes/uploadRoutes.js
 const express = require("express");
-const upload = require("../config/multerConfig");
+const upload = require("../config/multerConfig.js");
 
 const {
   userIdValidationRules,
@@ -13,7 +12,6 @@ const { uploadProfilePic, uploadResume } = require("../controllers/uploadControl
 
 const router = express.Router();
 
-// Routes
 router.post(
   "/:userId/profile-pic",
   verifyToken,

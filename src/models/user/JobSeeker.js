@@ -34,7 +34,7 @@ const savedJobSchema = new mongoose.Schema({
 
 const jobSeekerSchema = new mongoose.Schema(
   {
-    mongoId: {
+    userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
