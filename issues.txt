@@ -1,0 +1,12 @@
+When retrieving job give full detail of that job
+
+Connection Implementation for posts
+
+save/unsave a job
+save/unsave a post
+
+like/unlike a post
+
+comment/delete comment 
+
+

@@ -1,5 +1,6 @@
 const Job = require("../../models/job/Job");
 const Company = require("../../models/company/Company");
+const JobSeeker = require("../../models/user/JobSeeker");
 const {
   checkUserExists,
   checkRole,
@@ -7,239 +8,262 @@ const {
   checkCompanyExists,
   checkEmployerExists,
   checkCompanyAdminExists,
-  checkJobSeekerExists,
   renderProfileWithFallback,
 } = require("../../utils/checks");
 
 exports.createJob = async (req, res) => {
-  const { role, userId } = req.user;
-  const user = await checkUserExists(userId);
-  checkRole(role, ["company_admin", "employer"], "Unauthorized: Only company admins and employers can create jobs");
+  try {
+    const { role, userId } = req.user;
+    const user = await checkUserExists(userId);
+    checkRole(role, ["company_admin", "employer"], "Unauthorized: Only company admins and employers can create jobs");
 
-  let companyId = null;
-  let company = null;
+    let companyId = null;
+    let company = null;
 
-  if (role === "company_admin") {
-    const companyAdmin = await checkCompanyAdminExists(userId);
-    companyId = companyAdmin.companyId;
-    company = await checkCompanyExists(companyId);
-  } else if (role === "employer") {
-    const employer = await checkEmployerExists(userId);
-    if (employer.roleType === "Company Employer") {
-      if (!employer.companyId) {
-        throw new Error("Company Employer must be associated with a company", { status: 400 });
-      }
-      companyId = employer.companyId;
+    if (role === "company_admin") {
+      const companyAdmin = await checkCompanyAdminExists(userId);
+      companyId = companyAdmin.companyId;
       company = await checkCompanyExists(companyId);
+    } else if (role === "employer") {
+      const employer = await checkEmployerExists(userId);
+      if (employer.roleType === "Company Employer") {
+        if (!employer.companyId) {
+          throw new Error("Company Employer must be associated with a company");
+        }
+        companyId = employer.companyId;
+        company = await checkCompanyExists(companyId);
+      }
     }
-  }
 
-  const jobData = {
-    ...req.body,
-    companyId,
-    postedBy: userId,
-    status: req.body.status || "Draft",
-  };
+    const jobData = {
+      ...req.body,
+      companyId,
+      postedBy: userId,
+      status: req.body.status || "Draft",
+    };
 
-  const job = new Job(jobData);
-  await job.save();
+    const job = new Job(jobData);
+    await job.save();
 
-  if (companyId && company) {
-    company.jobListings.push({ jobId: job._id });
-    await company.save();
-  }
-
-  if (role === "employer") {
-    const employer = await checkEmployerExists(userId);
-    if (employer.roleType === "Company Employer") {
-      employer.jobListings.push({ jobId: job._id });
-      await employer.save();
+    if (companyId && company) {
+      company.jobListings.push({ jobId: job._id });
+      await company.save();
     }
+
+    if (role === "employer") {
+      const employer = await checkEmployerExists(userId);
+      if (employer.roleType === "Company Employer") {
+        employer.jobListings.push({ jobId: job._id });
+        await employer.save();
+      }
+    }
+
+    const jobProfile = renderProfileWithFallback(job, "job", {
+      _id: job._id,
+      title: job.title,
+      companyId: job.companyId,
+      company: company ? { _id: company._id, name: company.name, logo: company.logo } : null,
+      postedBy: job.postedBy,
+      description: job.description,
+      location: job.location,
+      jobType: job.jobType,
+      salary: job.salary,
+      requirements: job.requirements,
+      skills: job.skills,
+      experienceLevel: job.experienceLevel,
+      applicationDeadline: job.applicationDeadline,
+      status: job.status,
+      createdAt: job.createdAt,
+    });
+
+    res.status(200).json({
+      message: "Job created successfully",
+      job: jobProfile,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while creating the job",
+    });
   }
-
-  const jobProfile = renderProfileWithFallback(job, "job", {
-    _id: job._id,
-    title: job.title,
-    companyId: job.companyId,
-    company: company ? { _id: company._id, name: company.name, logo: company.logo } : null,
-    postedBy: job.postedBy,
-    description: job.description,
-    location: job.location,
-    jobType: job.jobType,
-    salary: job.salary,
-    requirements: job.requirements,
-    skills: job.skills,
-    experienceLevel: job.experienceLevel,
-    applicationDeadline: job.applicationDeadline,
-    status: job.status,
-    createdAt: job.createdAt,
-  });
-
-  res.status(200).json({
-    message: "Job created successfully",
-    job: jobProfile,
-  });
 };
 
 exports.updateJob = async (req, res) => {
-  const { jobId } = req.params;
-  const { role, userId } = req.user;
-  const updates = req.body;
+  try {
+    const { jobId } = req.params;
+    const { role, userId } = req.user;
+    const updates = req.body;
 
-  const job = await checkJobExists(jobId);
-  checkRole(role, ["company_admin", "employer"], "Unauthorized: Only company admins and employers can update jobs");
+    const job = await checkJobExists(jobId);
+    checkRole(role, ["company_admin", "employer"], "Unauthorized: Only company admins and employers can update jobs");
 
-  if (role === "employer" && job.postedBy.toString() !== userId) {
-    throw new Error("Unauthorized: You can only update jobs you posted", { status: 403 });
-  }
-
-  if (role === "company_admin") {
-    const companyAdmin = await checkCompanyAdminExists(userId);
-    if (job.companyId && companyAdmin.companyId.toString() !== job.companyId.toString()) {
-      throw new Error("Unauthorized: You can only update jobs for your company", { status: 403 });
+    if (role === "employer" && job.postedBy.toString() !== userId) {
+      throw new Error("Unauthorized: You can only update jobs you posted");
     }
-  }
 
-  const allowedUpdates = [
-    "title",
-    "description",
-    "location",
-    "jobType",
-    "salary",
-    "requirements",
-    "skills",
-    "experienceLevel",
-    "applicationDeadline",
-    "status",
-  ];
-
-  Object.keys(updates).forEach((key) => {
-    if (allowedUpdates.includes(key)) {
-      job[key] = updates[key];
+    if (role === "company_admin") {
+      const companyAdmin = await checkCompanyAdminExists(userId);
+      if (job.companyId && companyAdmin.companyId.toString() !== job.companyId.toString()) {
+        throw new Error("Unauthorized: You can only update jobs for your company");
+      }
     }
-  });
 
-  await job.save();
+    const allowedUpdates = [
+      "title",
+      "description",
+      "location",
+      "jobType",
+      "salary",
+      "requirements",
+      "skills",
+      "experienceLevel",
+      "applicationDeadline",
+      "status",
+    ];
 
-  const company = job.companyId ? await Company.findOne({ _id: job.companyId, isDeleted: false }) : null;
+    Object.keys(updates).forEach((key) => {
+      if (allowedUpdates.includes(key)) {
+        job[key] = updates[key];
+      }
+    });
 
-  const jobProfile = renderProfileWithFallback(job, "job", {
-    _id: job._id,
-    title: job.title,
-    companyId: job.companyId,
-    company: company ? { _id: company._id, name: company.name, logo: company.logo } : null,
-    postedBy: job.postedBy,
-    description: job.description,
-    location: job.location,
-    jobType: job.jobType,
-    salary: job.salary,
-    requirements: job.requirements,
-    skills: job.skills,
-    experienceLevel: job.experienceLevel,
-    applicationDeadline: job.applicationDeadline,
-    status: job.status,
-    updatedAt: job.updatedAt,
-  });
+    await job.save();
 
-  res.status(200).json({
-    message: "Job updated successfully",
-    job: jobProfile,
-  });
+    const company = job.companyId ? await Company.findOne({ _id: job.companyId, isDeleted: false }) : null;
+
+    const jobProfile = renderProfileWithFallback(job, "job", {
+      _id: job._id,
+      title: job.title,
+      companyId: job.companyId,
+      company: company ? { _id: company._id, name: company.name, logo: company.logo } : null,
+      postedBy: job.postedBy,
+      description: job.description,
+      location: job.location,
+      jobType: job.jobType,
+      salary: job.salary,
+      requirements: job.requirements,
+      skills: job.skills,
+      experienceLevel: job.experienceLevel,
+      applicationDeadline: job.applicationDeadline,
+      status: job.status,
+      updatedAt: job.updatedAt,
+    });
+
+    res.status(200).json({
+      message: "Job updated successfully",
+      job: jobProfile,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while updating the job",
+    });
+  }
 };
 
 exports.deleteJob = async (req, res) => {
-  const { jobId } = req.params;
-  const { role, userId } = req.user;
+  try {
+    const { jobId } = req.params;
+    const { role, userId } = req.user;
 
-  const job = await checkJobExists(jobId);
-  checkRole(role, ["company_admin", "employer"], "Unauthorized: Only company admins and employers can delete jobs");
+    const job = await checkJobExists(jobId);
+    checkRole(role, ["company_admin", "employer"], "Unauthorized: Only company admins and employers can delete jobs");
 
-  if (role === "employer" && job.postedBy.toString() !== userId) {
-    throw new Error("Unauthorized: You can only delete jobs you posted", { status: 403 });
-  }
-
-  if (role === "company_admin") {
-    const companyAdmin = await checkCompanyAdminExists(userId);
-    if (job.companyId && companyAdmin.companyId.toString() !== job.companyId.toString()) {
-      throw new Error("Unauthorized: You can only delete jobs for your company", { status: 403 });
+    if (role === "employer" && job.postedBy.toString() !== userId) {
+      throw new Error("Unauthorized: You can only delete jobs you posted");
     }
-  }
 
-  if (job.companyId) {
-    const company = await checkCompanyExists(job.companyId);
-    company.jobListings = company.jobListings.filter(
-      (listing) => listing.jobId.toString() !== jobId.toString()
-    );
-    await company.save();
-  }
+    if (role === "company_admin") {
+      const companyAdmin = await checkCompanyAdminExists(userId);
+      if (job.companyId && companyAdmin.companyId.toString() !== job.companyId.toString()) {
+        throw new Error("Unauthorized: You can only delete jobs for your company");
+      }
+    }
 
-  if (role === "employer") {
-    const employer = await checkEmployerExists(userId);
-    if (employer.roleType === "Company Employer") {
-      employer.jobListings = employer.jobListings.filter(
+    if (job.companyId) {
+      const company = await checkCompanyExists(job.companyId);
+      company.jobListings = company.jobListings.filter(
         (listing) => listing.jobId.toString() !== jobId.toString()
       );
-      await employer.save();
+      await company.save();
     }
+
+    if (role === "employer") {
+      const employer = await checkEmployerExists(userId);
+      if (employer.roleType === "Company Employer") {
+        employer.jobListings = employer.jobListings.filter(
+          (listing) => listing.jobId.toString() !== jobId.toString()
+        );
+        await employer.save();
+      }
+    }
+
+    await JobSeeker.updateMany(
+      { "appliedJobs.jobId": jobId },
+      { $pull: { appliedJobs: { jobId } } }
+    );
+    await JobSeeker.updateMany(
+      { "savedJobs.jobId": jobId },
+      { $pull: { savedJobs: { jobId } } }
+    );
+
+    await job.softDelete();
+
+    res.status(200).json({ message: "Job deleted successfully" });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while deleting the job",
+    });
   }
-
-  await JobSeeker.updateMany(
-    { "appliedJobs.jobId": jobId },
-    { $pull: { appliedJobs: { jobId } } }
-  );
-  await JobSeeker.updateMany(
-    { "savedJobs.jobId": jobId },
-    { $pull: { savedJobs: { jobId } } }
-  );
-
-  await job.softDelete();
-
-  res.status(200).json({ message: "Job deleted successfully" });
 };
 
 exports.hireCandidate = async (req, res) => {
-  const { jobId, jobSeekerId } = req.params;
-  const { userId, role } = req.user;
+  try {
+    const { jobId, jobSeekerId } = req.params;
+    const { userId, role } = req.user;
 
-  checkRole(role, ["employer"], "Unauthorized: Only employers can hire candidates");
+    checkRole(role, ["employer"], "Unauthorized: Only employers can hire candidates");
 
-  const job = await checkJobExists(jobId);
-  if (job.postedBy.toString() !== userId) {
-    throw new Error("Unauthorized: You can only hire for jobs you posted", { status: 403 });
+    const job = await checkJobExists(jobId);
+    if (job.postedBy.toString() !== userId) {
+      throw new Error("Unauthorized: You can only hire for jobs you posted");
+    }
+
+    const jobSeeker = await JobSeeker.findOne({ _id: jobSeekerId, isDeleted: false });
+    if (!jobSeeker) {
+      throw new Error("Job seeker not found");
+    }
+
+    const applicant = job.applicants.find((applicant) => applicant.userId.toString() === jobSeeker.userId.toString());
+    if (!applicant) {
+      throw new Error("This job seeker has not applied for the job");
+    }
+
+    const employer = await checkEmployerExists(userId);
+
+    const alreadyHired = employer.hiredCandidates.some(
+      (candidate) => candidate.jobSeekerId.toString() === jobSeekerId.toString()
+    );
+    const alreadyHiredInJob = job.hiredCandidates.some(
+      (candidate) => candidate.jobSeekerId.toString() === jobSeekerId.toString()
+    );
+    if (alreadyHired || alreadyHiredInJob) {
+      throw new Error("This candidate has already been hired");
+    }
+
+    applicant.status = "Hired";
+    job.hiredCandidates.push({ jobSeekerId });
+
+    employer.hiredCandidates.push({ jobSeekerId, jobId });
+    await employer.save();
+
+    jobSeeker.status = "Hired";
+    await jobSeeker.save();
+
+    await job.save();
+
+    res.status(200).json({ message: "Candidate hired successfully" });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while hiring the candidate",
+    });
   }
-
-  const jobSeeker = await JobSeeker.findOne({ _id: jobSeekerId, isDeleted: false });
-  if (!jobSeeker) {
-    throw new Error("Job seeker not found", { status: 404 });
-  }
-
-  const applicant = job.applicants.find((applicant) => applicant.userId.toString() === jobSeeker.userId.toString());
-  if (!applicant) {
-    throw new Error("This job seeker has not applied for the job", { status: 400 });
-  }
-
-  const employer = await checkEmployerExists(userId);
-
-  const alreadyHired = employer.hiredCandidates.some(
-    (candidate) => candidate.jobSeekerId.toString() === jobSeekerId.toString()
-  );
-  const alreadyHiredInJob = job.hiredCandidates.some(
-    (candidate) => candidate.jobSeekerId.toString() === jobSeekerId.toString()
-  );
-  if (alreadyHired || alreadyHiredInJob) {
-    throw new Error("This candidate has already been hired", { status: 400 });
-  }
-
-  applicant.status = "Hired";
-  job.hiredCandidates.push({ jobSeekerId });
-
-  employer.hiredCandidates.push({ jobSeekerId, jobId });
-  await employer.save();
-
-  jobSeeker.status = "Hired";
-  await jobSeeker.save();
-
-  await job.save();
-
-  res.status(200).json({ message: "Candidate hired successfully" });
 };

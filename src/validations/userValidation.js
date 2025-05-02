@@ -86,8 +86,6 @@ const updateProfileValidationRules = [
     .withMessage("Invalid company ID"),
   body("companyName")
     .optional()
-    .notEmpty()
-    .withMessage("Company name cannot be empty")
     .trim(),
   body("permissions")
     .optional()

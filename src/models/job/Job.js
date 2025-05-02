@@ -13,7 +13,7 @@ const salarySchema = new mongoose.Schema({
 });
 
 const applicantSchema = new mongoose.Schema({
-  mongoId: { type: mongoose.Schema.Types.ObjectId, ref: "JobSeeker", required: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "JobSeeker", required: true },
   appliedAt: { type: Date, default: Date.now },
   status: { type: String, enum: ["Applied", "Under Review", "Interview", "Hired", "Rejected"], default: "Applied" },
 });
@@ -32,7 +32,7 @@ const jobSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
     companyId: { type: mongoose.Schema.Types.ObjectId, ref: "Company" },
-    postedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Users", required: true },
+    postedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     description: { type: String, required: true },
     location: { type: locationSchema, required: true },
     jobType: { type: String, enum: ["Full-Time", "Part-Time", "Contract", "Internship"], required: true },
