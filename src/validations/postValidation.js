@@ -1,4 +1,4 @@
-const { body, param } = require("express-validator");
+const { body, param, validationResult} = require("express-validator");
 
 const postIdValidationRules = [
   param("postId")

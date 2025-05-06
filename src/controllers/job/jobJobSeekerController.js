@@ -1,10 +1,13 @@
 const Job = require("../../models/job/Job");
+const JobSeeker = require("../../models/user/JobSeeker");
+const Notification = require("../../models/notification/Notification");
 const {
   checkRole,
   checkJobExists,
   checkJobSeekerExists,
   renderProfileWithFallback,
 } = require("../../utils/checks");
+const { emitNotification } = require("../../socket/socket");
 
 exports.applyForJob = async (req, res) => {
   try {
@@ -13,33 +16,63 @@ exports.applyForJob = async (req, res) => {
 
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can apply for jobs");
 
-    const job = await checkJobExists(jobId);
+    const jobQuery = checkJobExists(jobId);
+    const job = await jobQuery.exec();
+    if (!job) {
+      const error = new Error("Job not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const jobSeeker = await checkJobSeekerExists(userId);
+    if (!jobSeeker) {
+      const error = new Error("Job seeker profile not found");
+      error.status = 404;
+      throw error;
+    }
+
     if (job.status !== "Open") {
-      throw new Error("This job is not open for applications");
+      const error = new Error("This job is not open for applications");
+      error.status = 400;
+      throw error;
     }
 
     const applicationDeadline = new Date(job.applicationDeadline);
     if (applicationDeadline < new Date()) {
-      throw new Error("Application deadline has passed");
+      const error = new Error("Application deadline has passed");
+      error.status = 400;
+      throw error;
     }
 
-    const jobSeeker = await checkJobSeekerExists(userId);
+    const existingApplicationIndex = job.applicants.findIndex(
+      (applicant) => applicant.mongoId.toString() === userId.toString()
+    );
+    const existingJobSeekerApplicationIndex = jobSeeker.appliedJobs.findIndex(
+      (appliedJob) => appliedJob.jobId.toString() === jobId.toString()
+    );
 
-    const alreadyApplied = job.applicants.some((applicant) => applicant.userId.toString() === userId);
-    if (alreadyApplied) {
-      throw new Error("You have already applied for this job");
+    let message;
+    if (existingApplicationIndex !== -1 && existingJobSeekerApplicationIndex !== -1) {
+      job.applicants.splice(existingApplicationIndex, 1);
+      jobSeeker.appliedJobs.splice(existingJobSeekerApplicationIndex, 1);
+      message = "Application canceled successfully";
+    } else if (existingApplicationIndex === -1 && existingJobSeekerApplicationIndex === -1) {
+      job.applicants.push({ mongoId: userId, appliedAt: new Date(), status: "Applied" });
+      jobSeeker.appliedJobs.push({ jobId });
+      message = "Application submitted successfully";
+    } else {
+      const error = new Error("Application state is inconsistent. Please contact support.");
+      error.status = 500;
+      throw error;
     }
 
-    job.applicants.push({ userId: userId });
     await job.save();
-
-    jobSeeker.appliedJobs.push({ jobId });
     await jobSeeker.save();
 
-    res.status(200).json({ message: "Application submitted successfully" });
+    res.status(200).json({ message });
   } catch (error) {
     res.status(error.status || 500).json({
-      message: error.message || "An error occurred while applying for the job",
+      message: error.message || "An error occurred while applying for or canceling the job application",
     });
   }
 };
@@ -51,24 +84,50 @@ exports.saveJob = async (req, res) => {
 
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can save jobs");
 
-    const job = await checkJobExists(jobId);
-    const jobSeeker = await checkJobSeekerExists(userId);
-
-    const alreadySaved = jobSeeker.savedJobs.some((savedJob) => savedJob.jobId.toString() === jobId);
-    const alreadySavedInJob = job.savedBy.some((saved) => saved.jobSeekerId.toString() === userId);
-    if (alreadySaved || alreadySavedInJob) {
-      throw new Error("You have already saved this job");
+    const jobQuery = checkJobExists(jobId);
+    const job = await jobQuery.exec();
+    if (!job) {
+      const error = new Error("Job not found");
+      error.status = 404;
+      throw error;
     }
 
-    jobSeeker.savedJobs.push({ jobId });
-    job.savedBy.push({ jobSeekerId: userId });
+    const jobSeeker = await checkJobSeekerExists(userId);
+    if (!jobSeeker) {
+      const error = new Error("Job seeker profile not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const existingSavedJobIndex = jobSeeker.savedJobs.findIndex(
+      (savedJob) => savedJob.jobId.toString() === jobId.toString()
+    );
+    const existingSavedByIndex = job.savedBy.findIndex(
+      (saved) => saved.jobSeekerId.toString() === userId.toString()
+    );
+
+    let message;
+    if (existingSavedJobIndex !== -1 && existingSavedByIndex !== -1) {
+      jobSeeker.savedJobs.splice(existingSavedJobIndex, 1);
+      job.savedBy.splice(existingSavedByIndex, 1);
+      message = "Job unsaved successfully";
+    } else if (existingSavedJobIndex === -1 && existingSavedByIndex === -1) {
+      jobSeeker.savedJobs.push({ jobId, savedAt: new Date() });
+      job.savedBy.push({ jobSeekerId: userId, savedAt: new Date() });
+      message = "Job saved successfully";
+    } else {
+      const error = new Error("Saved job state is inconsistent. Please contact support.");
+      error.status = 500;
+      throw error;
+    }
+
     await jobSeeker.save();
     await job.save();
 
-    res.status(200).json({ message: "Job saved successfully" });
+    res.status(200).json({ message });
   } catch (error) {
     res.status(error.status || 500).json({
-      message: error.message || "An error occurred while saving the job",
+      message: error.message || "An error occurred while saving or unsaving the job",
     });
   }
 };

@@ -17,7 +17,7 @@ const experienceSchema = new mongoose.Schema({
 });
 
 const jobPreferencesSchema = new mongoose.Schema({
-  jobType: { type: String, enum: ["Full-Time", "Part-Time", "Contract", "Internship"] },
+  jobType: { type: [String], enum: {values: ["Full-Time", "Part-Time", "Contract", "Internship"], message: "{VALUE} is not a valid job type",} },
   location: { type: String },
   salaryExpectation: { type: Number },
 });

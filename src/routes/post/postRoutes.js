@@ -7,91 +7,29 @@ const {
   commentValidationRules,
   validate,
 } = require("../../validations/postValidation");
-const {
-  createPost,
-  getPost,
-  getUserPosts,
-  updatePost,
-  deletePost,
-  likePost,
-  commentOnPost,
-  sharePost,
-  savePost,
-} = require("../../controllers/post/postController");
+const { createPost, getPost, getUserPosts, updatePost, deletePost, 
+      likePost, commentOnPost, deleteComment, sharePost, savePost,} = require("../../controllers/post/postController");
 
 const router = express.Router();
 
-// Create a post (with optional media upload)
-router.post(
-  "/",
-  verifyToken,
-  createPostValidationRules,
-  validate,
-  upload.single("media"),
-  createPost
-);
+router.post("/", verifyToken, createPostValidationRules, validate, upload.single("media"), createPost );
 
-// Get a single post
-router.get("/:postId", postIdValidationRules, validate, getPost);
+router.get("/:postId", verifyToken, postIdValidationRules, validate, getPost );
 
-// Get all posts by a user
-router.get("/user/:userId", postIdValidationRules, validate, getUserPosts);
+router.get("/user/:userId", verifyToken, postIdValidationRules, validate, getUserPosts);
 
-// Update a post (with optional media upload)
-router.put(
-  "/:postId",
-  verifyToken,
-  postIdValidationRules,
-  createPostValidationRules,
-  validate,
-  upload.single("media"),
-  updatePost
-);
+router.put("/:postId", verifyToken, postIdValidationRules, createPostValidationRules, validate, upload.single("media"), updatePost);
 
-// Delete a post
-router.delete(
-  "/:postId",
-  verifyToken,
-  postIdValidationRules,
-  validate,
-  deletePost
-);
+router.delete("/:postId", verifyToken, postIdValidationRules, validate, deletePost);
 
-// Like/unlike a post
-router.post(
-  "/:postId/like",
-  verifyToken,
-  postIdValidationRules,
-  validate,
-  likePost
-);
+router.post("/:postId/like", verifyToken, postIdValidationRules, validate, likePost);
 
-// Comment on a post
-router.post(
-  "/:postId/comment",
-  verifyToken,
-  postIdValidationRules,
-  commentValidationRules,
-  validate,
-  commentOnPost
-);
+router.post("/:postId/comment", verifyToken, postIdValidationRules, commentValidationRules, validate, commentOnPost);
 
-// Share a post
-router.post(
-  "/:postId/share",
-  verifyToken,
-  postIdValidationRules,
-  validate,
-  sharePost
-);
+router.delete("/:postId/comment/:commentId", verifyToken, postIdValidationRules, validate, deleteComment);
 
-// Save/unsave a post
-router.post(
-  "/:postId/save",
-  verifyToken,
-  postIdValidationRules,
-  validate,
-  savePost
-);
+router.post("/:postId/share", verifyToken, postIdValidationRules, validate, sharePost);
+
+router.post("/:postId/save", verifyToken, postIdValidationRules, validate, savePost);
 
 module.exports = router;

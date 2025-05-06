@@ -1,6 +1,8 @@
 const Job = require("../../models/job/Job");
 const Company = require("../../models/company/Company");
 const JobSeeker = require("../../models/user/JobSeeker");
+const UserProfile = require("../../models/user/UserProfile");
+const Notification = require("../../models/notification/Notification");
 const {
   checkUserExists,
   checkRole,
@@ -10,6 +12,7 @@ const {
   checkCompanyAdminExists,
   renderProfileWithFallback,
 } = require("../../utils/checks");
+const { emitNotification } = require("../../socket/socket");
 
 exports.createJob = async (req, res) => {
   try {
@@ -48,6 +51,21 @@ exports.createJob = async (req, res) => {
     if (companyId && company) {
       company.jobListings.push({ jobId: job._id });
       await company.save();
+
+      const followers = await UserProfile.find({ followedCompanies: companyId });
+      if (followers.length > 0) {
+        const notifications = followers.map((follower) => ({
+          userId: follower.userId,
+          type: "newJob",
+          relatedId: job._id,
+          message: `${company.name} posted a new job: ${job.title}`,
+          createdAt: new Date(),
+        }));
+        await Notification.insertMany(notifications);
+        notifications.forEach((notification) => {
+          emitNotification(notification.userId.toString(), notification);
+        });
+      }
     }
 
     if (role === "employer") {
@@ -259,6 +277,15 @@ exports.hireCandidate = async (req, res) => {
     await jobSeeker.save();
 
     await job.save();
+
+    const notification = new Notification({
+      userId: jobSeeker.userId,
+      type: "applicationUpdate",
+      relatedId: job._id,
+      message: `You have been hired for the job: ${job.title}`,
+    });
+    await notification.save();
+    emitNotification(jobSeeker.userId.toString(), notification);
 
     res.status(200).json({ message: "Candidate hired successfully" });
   } catch (error) {

@@ -5,6 +5,7 @@ const Employer = require("../models/user/Employer");
 const CompanyAdmin = require("../models/company/CompanyAdmin");
 const Company = require("../models/company/Company");
 const Job = require("../models/job/Job");
+const Post = require("../models/post/Posts");
 
 const checkUserExists = async (userId) => {
   const user = await User.findOne({ _id: userId, isDeleted: false });
@@ -137,7 +138,6 @@ const renderProfileWithFallback = (entity, type, fallback, isCreator = false) =>
       profile.roleSpecificData = entity.roleSpecificData || fallback.roleSpecificData || {};
       break;
     case "job":
-      // Base job details (always included)
       profile._id = entity._id || fallback._id;
       profile.title = entity.title || fallback.title;
       profile.companyId = entity.companyId || fallback.companyId;
@@ -160,7 +160,6 @@ const renderProfileWithFallback = (entity, type, fallback, isCreator = false) =>
       profile.status = entity.status || fallback.status;
       profile.createdAt = entity.createdAt || fallback.createdAt;
 
-      // Include additional fields only if the user is the creator (employer or company_admin)
       if (isCreator) {
         profile.applicants = entity.applicants || [];
         profile.savedBy = entity.savedBy || [];

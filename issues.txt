@@ -1,12 +1,5 @@
-When retrieving job give full detail of that job
+Company Admin issue:
+Company is not properly linked with Company Admin and vice versa
 
-Connection Implementation for posts
-
-save/unsave a job
-save/unsave a post
-
-like/unlike a post
-
-comment/delete comment 
-
+Save Post in UserProfile
 

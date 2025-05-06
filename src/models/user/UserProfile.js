@@ -1,6 +1,12 @@
 const mongoose = require("mongoose");
 const { applySoftDelete } = require("../../utils/softDelete");
 
+const connectionRequestSchema = new mongoose.Schema({
+  fromUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  status: { type: String, enum: ["pending", "accepted", "rejected"], default: "pending" },
+  createdAt: { type: Date, default: Date.now },
+});
+
 const userProfileSchema = new mongoose.Schema(
   {
     userId: {
@@ -29,6 +35,9 @@ const userProfileSchema = new mongoose.Schema(
       },
     ],
     isProfileComplete: { type: Boolean, default: false },
+    connectionRequests: [connectionRequestSchema],
+    connections: [{ type: mongoose.Schema.Types.ObjectId, ref: "User", default: [] }],
+    followedCompanies: [{ type: mongoose.Schema.Types.ObjectId, ref: "Company", default: [] }],
   },
   { timestamps: true }
 );
@@ -43,6 +52,5 @@ userProfileSchema.pre("save", function (next) {
   });
   next();
 });
-
 
 module.exports = mongoose.model("UserProfile", userProfileSchema);

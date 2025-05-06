@@ -1,10 +1,13 @@
 const Post = require("../../models/post/Posts");
+const Notification = require("../../models/notification/Notification");
+const UserProfile = require("../../models/user/UserProfile");
 const {
   checkPostExists,
   checkPostOwnership,
   checkUserExists,
   checkUserOrCompanyExists,
 } = require("../../utils/checks");
+const { emitNotification } = require("../../socket/socket");
 
 exports.createPost = async (req, res) => {
   try {
@@ -37,6 +40,23 @@ exports.createPost = async (req, res) => {
 
     await post.save();
 
+    if (post.visibility === "public") {
+      const userProfile = await UserProfile.findOne({ userId });
+      if (userProfile && userProfile.connections.length > 0) {
+        const notifications = userProfile.connections.map((connectionId) => ({
+          userId: connectionId,
+          type: "newPost",
+          relatedId: post._id,
+          message: `${userProfile.fullName} has created a new post`,
+          createdAt: new Date(),
+        }));
+        await Notification.insertMany(notifications);
+        notifications.forEach((notification) => {
+          emitNotification(notification.userId.toString(), notification);
+        });
+      }
+    }
+
     const populatedPost = await Post.findById(post._id)
       .populate("userId", "email role")
       .populate("tags.id", "name");
@@ -55,8 +75,13 @@ exports.createPost = async (req, res) => {
 exports.getPost = async (req, res) => {
   try {
     const { postId } = req.params;
+    const { userId } = req.user;
 
     const post = await checkPostExists(postId);
+
+    if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
+      throw new Error("Unauthorized: This post is private");
+    }
 
     return res.status(200).json({ post });
   } catch (error) {
@@ -69,10 +94,16 @@ exports.getPost = async (req, res) => {
 exports.getUserPosts = async (req, res) => {
   try {
     const { userId } = req.params;
+    const authenticatedUserId = req.user.userId;
 
     await checkUserExists(userId);
 
-    const posts = await Post.find({ userId, isDeleted: false })
+    const query = { userId, isDeleted: false };
+    if (userId.toString() !== authenticatedUserId.toString()) {
+      query.visibility = "public";
+    }
+
+    const posts = await Post.find(query)
       .populate("userId", "email role")
       .populate("tags.id", "name")
       .sort({ createdAt: -1 });
@@ -157,7 +188,13 @@ exports.likePost = async (req, res) => {
 
     const post = await checkPostExists(postId);
 
-    if (post.likes.includes(userId)) {
+    // Check visibility
+    if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
+      throw new Error("Unauthorized: This post is private");
+    }
+
+    const isLiked = post.likes.includes(userId);
+    if (isLiked) {
       post.likes = post.likes.filter((id) => id.toString() !== userId.toString());
     } else {
       post.likes.push(userId);
@@ -165,8 +202,20 @@ exports.likePost = async (req, res) => {
 
     await post.save();
 
+    if (!isLiked && post.userId.toString() !== userId.toString()) {
+      const userProfile = await UserProfile.findOne({ userId });
+      const notification = new Notification({
+        userId: post.userId,
+        type: "postInteraction",
+        relatedId: post._id,
+        message: `${userProfile.fullName} liked your post`,
+      });
+      await notification.save();
+      emitNotification(post.userId.toString(), notification);
+    }
+
     return res.status(200).json({
-      message: post.likes.includes(userId) ? "Post liked" : "Post unliked",
+      message: isLiked ? "Post unliked" : "Post liked",
       likes: post.likes.length,
     });
   } catch (error) {
@@ -184,6 +233,11 @@ exports.commentOnPost = async (req, res) => {
 
     const post = await checkPostExists(postId);
 
+    // Check visibility
+    if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
+      throw new Error("Unauthorized: This post is private");
+    }
+
     post.comments.push({
       userId,
       content,
@@ -191,6 +245,18 @@ exports.commentOnPost = async (req, res) => {
     });
 
     await post.save();
+
+    if (post.userId.toString() !== userId.toString()) {
+      const userProfile = await UserProfile.findOne({ userId });
+      const notification = new Notification({
+        userId: post.userId,
+        type: "postInteraction",
+        relatedId: post._id,
+        message: `${userProfile.fullName} commented on your post`,
+      });
+      await notification.save();
+      emitNotification(post.userId.toString(), notification);
+    }
 
     return res.status(200).json({
       message: "Comment added successfully",
@@ -203,6 +269,47 @@ exports.commentOnPost = async (req, res) => {
   }
 };
 
+exports.deleteComment = async (req, res) => {
+  try {
+    const { postId, commentId } = req.params;
+    const { userId } = req.user;
+
+    const post = await checkPostExists(postId);
+
+    // Check visibility
+    if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
+      throw new Error("Unauthorized: This post is private");
+    }
+
+    const commentIndex = post.comments.findIndex(
+      (comment) => comment._id.toString() === commentId
+    );
+    if (commentIndex === -1) {
+      const error = new Error("Comment not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const comment = post.comments[commentIndex];
+    if (comment.userId.toString() !== userId.toString()) {
+      const error = new Error("Unauthorized: You can only delete your own comments");
+      error.status = 403;
+      throw error;
+    }
+
+    post.comments.splice(commentIndex, 1);
+    await post.save();
+
+    return res.status(200).json({
+      message: "Comment deleted successfully",
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while deleting the comment",
+    });
+  }
+};
+
 exports.sharePost = async (req, res) => {
   try {
     const { postId } = req.params;
@@ -210,12 +317,29 @@ exports.sharePost = async (req, res) => {
 
     const post = await checkPostExists(postId);
 
+    // Check visibility
+    if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
+      throw new Error("Unauthorized: This post is private");
+    }
+
     if (post.shares.includes(userId)) {
       throw new Error("You have already shared this post");
     }
 
     post.shares.push(userId);
     await post.save();
+
+    if (post.userId.toString() !== userId.toString()) {
+      const userProfile = await UserProfile.findOne({ userId });
+      const notification = new Notification({
+        userId: post.userId,
+        type: "postInteraction",
+        relatedId: post._id,
+        message: `${userProfile.fullName} shared your post`,
+      });
+      await notification.save();
+      emitNotification(post.userId.toString(), notification);
+    }
 
     return res.status(200).json({
       message: "Post shared successfully",
@@ -234,6 +358,11 @@ exports.savePost = async (req, res) => {
     const { userId } = req.user;
 
     const post = await checkPostExists(postId);
+
+    // Check visibility
+    if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
+      throw new Error("Unauthorized: This post is private");
+    }
 
     if (post.saves.includes(userId)) {
       post.saves = post.saves.filter((id) => id.toString() !== userId.toString());

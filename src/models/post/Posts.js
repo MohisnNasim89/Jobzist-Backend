@@ -43,7 +43,7 @@ const postSchema = new mongoose.Schema(
     saves: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     visibility: {
       type: String,
-      enum: ["public", "connections", "private"],
+      enum: ["public", "private"],
       default: "public",
     },
   },

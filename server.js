@@ -4,16 +4,21 @@ const cors = require("cors");
 const morgan = require("morgan");
 const helmet = require("helmet");
 const connectDB = require("./src/config/database/mongo");
-const upload = require("./src/config/multerConfig"); // Import Cloudinary-based multer config
+const upload = require("./src/config/multerConfig");
 const errorMiddleware = require("./src/middlewares/errorMiddleware");
+const { initSocket } = require("./src/socket/socket");
 
 // Routes
 const authRoutes = require("./src/routes/authRoutes");
-const userRoutes = require("./src/routes/profile/userProfileRoutes");
+const userProfileRoutes = require("./src/routes/profile/userProfileRoutes");
 const companyRoutes = require("./src/routes/profile/companyProfileRoutes");
 const uploadRoutes = require("./src/routes/uploadRoutes");
 const jobRoutes = require("./src/routes/job/jobRoutes");
 const postRoutes = require("./src/routes/post/postRoutes");
+const userRoutes = require("./src/routes/userConnection/connectionRoutes");
+const notificationRoutes = require("./src/routes/notification/notificationRoutes");
+const feedRoutes = require("./src/routes/feed/feedRoutes");
+const searchRoutes = require("./src/routes/search/searchRoutes");
 
 dotenv.config();
 const app = express();
@@ -29,11 +34,15 @@ app.set("upload", upload);
 
 // Routes
 app.use("/api/auth", authRoutes);
-app.use("/api/user", userRoutes);
+app.use("/api/user", userProfileRoutes);
 app.use("/api/company", companyRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/job", jobRoutes);
 app.use("/api/post", postRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/feed", feedRoutes);
+app.use("/api/search", searchRoutes);
 
 // Root Route
 app.get("/", (req, res) => {
@@ -63,10 +72,12 @@ connectDB()
     server = app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });
+
+    initSocket(server);
   })
   .catch((err) => {
     console.error("Failed to connect to MongoDB:", err);
-    process.exit(1); // Exit if MongoDB connection fails
+    process.exit(1);
   });
 
 // Graceful Shutdown
@@ -82,4 +93,4 @@ process.on("SIGINT", () => {
   });
 });
 
-module.exports = app; // Export for testing
+module.exports = app;
