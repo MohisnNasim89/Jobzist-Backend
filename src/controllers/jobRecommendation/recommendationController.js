@@ -1,6 +1,6 @@
-const Job = require("../models/job/Job");
-const JobSeeker = require("../models/user/JobSeeker");
-const { checkJobSeekerExists } = require("../utils/checks");
+const Job = require("../../models/job/Job");
+const JobSeeker = require("../../models/user/JobSeeker");
+const { checkJobSeekerExists } = require("../../utils/checks");
 const axios = require("axios");
 
 const calculateExperienceYears = (experience) => {

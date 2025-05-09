@@ -20,6 +20,7 @@ const notificationRoutes = require("./src/routes/notification/notificationRoutes
 const feedRoutes = require("./src/routes/feed/feedRoutes");
 const searchRoutes = require("./src/routes/search/searchRoutes");
 const recommendationRoutes = require("./src/routes/recommendation/recommendationRoutes");
+const chatRoutes = require("./src/routes/chatRoutes");
 
 dotenv.config();
 const app = express();
@@ -45,6 +46,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/feed", feedRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/recommendations", recommendationRoutes);
+app.use("/api/chats", chatRoutes);
 
 // Root Route
 app.get("/", (req, res) => {

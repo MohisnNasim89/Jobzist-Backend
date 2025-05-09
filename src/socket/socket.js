@@ -1,32 +1,35 @@
-const socketIo = require("socket.io");
+const { Server } = require("socket.io");
+const Notification = require("../models/notification/Notification");
 
-let io;
+const socketMap = new Map();
 
-const initSocket = (server) => {
-  io = socketIo(server, {
-    cors: {
-      origin: "*",
-      methods: ["GET", "POST"],
-    },
-  });
-
+const setupSocket = (io) => {
   io.on("connection", (socket) => {
-    console.log("A user connected:", socket.id);
+    const userId = socket.handshake.query.userId;
+    if (userId) {
+      socketMap.set(userId, socket.id);
+      console.log(`User ${userId} connected with socket ID ${socket.id}`);
 
-    socket.on("join", (userId) => {
-      socket.join(userId);
-    });
-
-    socket.on("disconnect", () => {
-      console.log("User disconnected:", socket.id);
-    });
+      socket.on("disconnect", () => {
+        socketMap.delete(userId);
+        console.log(`User ${userId} disconnected`);
+      });
+    }
   });
 };
 
 const emitNotification = (userId, notification) => {
-  if (io) {
-    io.to(userId).emit("notification", notification);
+  const socketId = socketMap.get(userId.toString());
+  if (socketId) {
+    io.to(socketId).emit("notification", notification);
   }
 };
 
-module.exports = { initSocket, emitNotification };
+const emitMessage = (userId, message) => {
+  const socketId = socketMap.get(userId.toString());
+  if (socketId) {
+    io.to(socketId).emit("message", message);
+  }
+};
+
+module.exports = { setupSocket, emitNotification, emitMessage };

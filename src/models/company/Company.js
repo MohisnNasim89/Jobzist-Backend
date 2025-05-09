@@ -41,7 +41,6 @@ const companySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Apply soft delete middleware
 applySoftDelete(companySchema);
 
 module.exports = mongoose.model("Company", companySchema);

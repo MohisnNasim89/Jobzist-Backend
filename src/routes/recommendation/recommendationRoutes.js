@@ -1,8 +1,8 @@
 const express = require("express");
 const router = express.Router();
-const { getJobRecommendations } = require("../controllers/recommendationsController");
-const { authenticateToken } = require("../middleware/authMiddleware");
+const { getJobRecommendations } = require("../../controllers/jobRecommendation/recommendationController");
+const { verifyToken } = require("../../middlewares/authMiddleware");
 
-router.get("/jobs", authenticateToken, getJobRecommendations);
+router.get("/jobs", verifyToken, getJobRecommendations);
 
 module.exports = router;
