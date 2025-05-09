@@ -1,5 +1,22 @@
-Company Admin issue:
-Company is not properly linked with Company Admin and vice versa
+Save Post in UserProfile 
 
-Save Post in UserProfile
+notifications older than 1 month deleted automatically from DB
 
+
+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
+
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+  apiKey: "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",
+});
+
+const completion = openai.chat.completions.create({
+  model: "gpt-4o-mini",
+  store: true,
+  messages: [
+    {"role": "user", "content": "write a haiku about ai"},
+  ],
+});
+
+completion.then((result) => console.log(result.choices[0].message));

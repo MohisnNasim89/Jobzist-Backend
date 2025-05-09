@@ -15,6 +15,10 @@ exports.createCompany = async (req, res) => {
     checkRole(role, ["company_admin"], "Only company admins can create companies");
     const companyAdmin = await checkCompanyAdminExists(userId);
 
+    if (companyAdmin.companyId) {
+      throw new Error("Unauthorized: CompanyAdmin already associated with a company");
+    }
+
     const company = new Company({
       name,
       industry,
@@ -25,6 +29,7 @@ exports.createCompany = async (req, res) => {
       foundedYear,
       socialLinks,
       logo,
+      companyAdmin: companyAdmin._id,
     });
 
     await company.save();
@@ -166,7 +171,11 @@ exports.deleteCompany = async (req, res) => {
     }
 
     await Job.updateMany({ companyId: companyId }, { $set: { isDeleted: true, deletedAt: new Date() } });
+
     await company.softDelete();
+
+    companyAdmin.companyId = null;
+    await companyAdmin.save();
 
     return res.status(200).json({ message: "Company soft deleted successfully" });
   } catch (error) {

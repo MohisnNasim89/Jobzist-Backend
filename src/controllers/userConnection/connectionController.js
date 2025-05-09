@@ -22,12 +22,40 @@ exports.sendConnectionRequest = async (req, res) => {
       throw new Error("User profile not found");
     }
 
-    // Check if already connected
     if (userProfile.connections.includes(targetUserId)) {
       throw new Error("You are already connected with this user");
     }
 
-    // Check if request already exists
+    const mutualRequest = userProfile.connectionRequests.find(
+      (req) => req.fromUserId.toString() === targetUserId.toString() && req.status === "pending"
+    );
+    if (mutualRequest) {
+      mutualRequest.status = "accepted";
+      userProfile.connections.push(targetUserId);
+      targetProfile.connections.push(userId);
+      await userProfile.save();
+      await targetProfile.save();
+
+      const userNotification = new Notification({
+        userId: userId,
+        type: "connectionRequest",
+        relatedId: targetUserId,
+        message: `${targetProfile.fullName} accepted your connection request`,
+      });
+      const targetNotification = new Notification({
+        userId: targetUserId,
+        type: "connectionRequest",
+        relatedId: userId,
+        message: `${userProfile.fullName} accepted your connection request`,
+      });
+      await userNotification.save();
+      await targetNotification.save();
+      emitNotification(userId.toString(), userNotification);
+      emitNotification(targetUserId.toString(), targetNotification);
+
+      return res.status(200).json({ message: "Mutual connection established successfully" });
+    }
+
     const existingRequest = targetProfile.connectionRequests.find(
       (req) => req.fromUserId.toString() === userId.toString()
     );
@@ -38,7 +66,6 @@ exports.sendConnectionRequest = async (req, res) => {
     targetProfile.connectionRequests.push({ fromUserId: userId });
     await targetProfile.save();
 
-    // Notify target user
     const notification = new Notification({
       userId: targetUserId,
       type: "connectionRequest",
@@ -78,11 +105,9 @@ exports.acceptConnectionRequest = async (req, res) => {
     userProfile.connectionRequests[requestIndex].status = "accepted";
     userProfile.connections.push(requestUserId);
     requesterProfile.connections.push(userId);
-
     await userProfile.save();
     await requesterProfile.save();
 
-    // Notify requester
     const notification = new Notification({
       userId: requestUserId,
       type: "connectionRequest",

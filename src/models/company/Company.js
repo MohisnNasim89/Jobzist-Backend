@@ -23,7 +23,11 @@ const companySchema = new mongoose.Schema(
     location: { type: locationSchema, required: true },
     website: { type: String },
     description: { type: String },
-    // companyAdmin: {type: mongoose.Schema.Types.ObjectId, ref: "CompanyAdmin", required: true},
+    companyAdmin: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CompanyAdmin",
+      required: true
+    },
     companySize: {
       type: String,
       enum: ["Startup", "Small", "Medium", "Large", "Enterprise"],
@@ -32,7 +36,7 @@ const companySchema = new mongoose.Schema(
     foundedYear: { type: Number, required: true },
     socialLinks: [socialLinkSchema],
     logo: { type: String },
-    jobListings: [jobListingSchema], // Added jobListings
+    jobListings: [jobListingSchema],
   },
   { timestamps: true }
 );

@@ -3,6 +3,7 @@ const Company = require("../../models/company/Company");
 const JobSeeker = require("../../models/user/JobSeeker");
 const UserProfile = require("../../models/user/UserProfile");
 const Notification = require("../../models/notification/Notification");
+
 const {
   checkUserExists,
   checkRole,

@@ -12,6 +12,7 @@ const companyAdminSchema = new mongoose.Schema(
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Company",
+      default: null
     },
     permissions: {
       type: [String],
@@ -41,6 +42,17 @@ const companyAdminSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+companyAdminSchema.pre('save', async function(next) {
+  if (this.isModified('companyId') && this.companyId) {
+    const existingCompany = await mongoose.model("Company").findOne({ companyAdmin: this._id });
+    if (existingCompany && existingCompany._id.toString() !== this.companyId.toString()) {
+      const error = new Error("CompanyAdmin already associated with another company");
+      return next(error);
+    }
+  }
+  next();
+});
 
 applySoftDelete(companyAdminSchema);
 
