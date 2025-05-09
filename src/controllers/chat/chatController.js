@@ -2,7 +2,22 @@ const Chat = require("../../models/chat/Chat");
 const User = require("../../models/user/Users");
 const UserProfile = require("../../models/user/UserProfile");
 const { checkUserExists } = require("../../utils/checks");
-const { emitMessage } = require("../../socket/socket");
+const { emitMessage, emitNotification } = require("../../socket/socket");
+const CryptoJS = require("crypto-js");
+const Notification = require("../../models/notification/Notification");
+
+const generateEncryptionKey = () => {
+  return CryptoJS.lib.WordArray.random(32).toString();
+};
+
+const encryptMessage = (message, key) => {
+  return CryptoJS.AES.encrypt(message, key).toString();
+};
+
+const decryptMessage = (encryptedMessage, key) => {
+  const bytes = CryptoJS.AES.decrypt(encryptedMessage, key);
+  return bytes.toString(CryptoJS.enc.Utf8);
+};
 
 exports.startChat = async (req, res) => {
   try {
@@ -28,17 +43,23 @@ exports.startChat = async (req, res) => {
     });
 
     if (!chat) {
+      const encryptionKey = generateEncryptionKey();
       chat = new Chat({
         participants: [
           { userId, name: userProfile.fullName },
           { userId: targetUserId, name: targetProfile.fullName },
         ],
         messages: [],
+        encryptionKey,
       });
       await chat.save();
     }
 
-    res.status(200).json({ chat });
+    const decryptedMessages = chat.messages.map((msg) =>
+      decryptMessage(msg.encryptedMessage, chat.encryptionKey)
+    );
+
+    res.status(200).json({ chat: { ...chat.toObject(), messages: decryptedMessages } });
   } catch (error) {
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while starting the chat",
@@ -65,9 +86,11 @@ exports.sendMessage = async (req, res) => {
       throw new Error("Unauthorized: You are not a participant in this chat");
     }
 
+    const encryptedMessage = encryptMessage(message.trim(), chat.encryptionKey);
+
     const newMessage = {
       senderId: userId,
-      message: message.trim(),
+      encryptedMessage,
       sentAt: new Date(),
     };
 
@@ -81,8 +104,21 @@ exports.sendMessage = async (req, res) => {
       chatId,
       message: newMessage,
     });
+    
+    const senderProfile = await UserProfile.findOne({ userId });
+    const notification = new Notification({
+      userId: otherParticipant.userId,
+      type: "newMessage",
+      relatedId: chatId,
+      message: `New message from ${senderProfile.fullName}`,
+      isRead: false,
+    });
+    await notification.save();
 
-    res.status(200).json({ message: "Message sent successfully", newMessage });
+    // Emit real-time notification to the receiver
+    emitNotification(otherParticipant.userId.toString(), notification);
+
+    res.status(200).json({ message: "Message sent successfully", newMessage: { ...newMessage, message: message.trim() } });
   } catch (error) {
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while sending the message",
@@ -104,7 +140,11 @@ exports.getChatHistory = async (req, res) => {
       throw new Error("Unauthorized: You are not a participant in this chat");
     }
 
-    res.status(200).json({ messages: chat.messages });
+    const decryptedMessages = chat.messages.map((msg) =>
+      ({ ...msg.toObject(), message: decryptMessage(msg.encryptedMessage, chat.encryptionKey) })
+    );
+
+    res.status(200).json({ messages: decryptedMessages });
   } catch (error) {
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving chat history",
@@ -120,7 +160,16 @@ exports.getUserChats = async (req, res) => {
       "participants.userId": userId,
     }).sort({ updatedAt: -1 });
 
-    res.status(200).json({ chats });
+    const enrichedChats = await Promise.all(chats.map(async (chat) => {
+      const latestMessage = chat.messages[chat.messages.length - 1];
+      if (latestMessage) {
+        const decryptedMessage = decryptMessage(latestMessage.encryptedMessage, chat.encryptionKey);
+        return { ...chat.toObject(), latestMessage: { ...latestMessage.toObject(), message: decryptedMessage } };
+      }
+      return chat.toObject();
+    }));
+
+    res.status(200).json({ chats: enrichedChats });
   } catch (error) {
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving user chats",
@@ -235,7 +284,9 @@ exports.editMessage = async (req, res) => {
       throw new Error("Unauthorized: You can only edit your own messages");
     }
 
-    chat.messages[messageIndex].message = newMessage.trim();
+    const encryptedNewMessage = encryptMessage(newMessage.trim(), chat.encryptionKey);
+
+    chat.messages[messageIndex].encryptedMessage = encryptedNewMessage;
     chat.messages[messageIndex].sentAt = new Date();
     await chat.save();
 
@@ -245,7 +296,7 @@ exports.editMessage = async (req, res) => {
     emitMessage(otherParticipant.userId.toString(), {
       chatId,
       messageId,
-      newMessage: newMessage.trim(),
+      newMessage: { encryptedMessage: encryptedNewMessage, sentAt: new Date() },
       action: "messageEdited",
     });
 

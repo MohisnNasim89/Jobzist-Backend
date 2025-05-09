@@ -8,15 +8,15 @@ const {
   deleteChat,
   deleteMessage,
   editMessage,
-} = require("../controllers/chat/chatController");
-const { authenticateToken } = require("../middlewares/authMiddleware");
+} = require("../../controllers/chat/chatController");
+const { verifyToken } = require("../../middlewares/authMiddleware");
 
-router.get("/user", authenticateToken, getUserChats);
-router.get("/start/:targetUserId", authenticateToken, startChat);
-router.get("/:chatId", authenticateToken, getChatHistory);
-router.post("/:chatId/send", authenticateToken, sendMessage);
-router.delete("/:chatId", authenticateToken, deleteChat);
-router.delete("/:chatId/message/:messageId", authenticateToken, deleteMessage);
-router.put("/:chatId/message/:messageId", authenticateToken, editMessage);
+router.get("/user", verifyToken, getUserChats);
+router.get("/start/:targetUserId", verifyToken, startChat);
+router.get("/:chatId", verifyToken, getChatHistory);
+router.post("/:chatId/send", verifyToken, sendMessage);
+router.delete("/:chatId", verifyToken, deleteChat);
+router.delete("/:chatId/message/:messageId", verifyToken, deleteMessage);
+router.put("/:chatId/message/:messageId", verifyToken, editMessage);
 
 module.exports = router;

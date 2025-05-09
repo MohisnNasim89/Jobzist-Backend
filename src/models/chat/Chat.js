@@ -1,5 +1,4 @@
 const mongoose = require("mongoose");
-const { applySoftDelete } = require("../../utils/softDelete");
 
 const messageSchema = new mongoose.Schema({
     messageId: {
@@ -11,7 +10,7 @@ const messageSchema = new mongoose.Schema({
         ref: "User",
         required: true,
     },
-    message: {
+    encryptedMessage: {
         type: String,
         required: true,
     },
@@ -37,6 +36,10 @@ const chatSchema = new mongoose.Schema(
             },
         ],
         messages: [messageSchema],
+        encryptionKey: {
+            type: String,
+            required: true,
+        },
         createdAt: {
             type: Date,
             default: Date.now,
@@ -57,7 +60,5 @@ chatSchema.pre("save", function (next) {
 });
 
 chatSchema.index({ "participants.userId": 1 });
-
-applySoftDelete(chatSchema);
 
 module.exports = mongoose.model("Chat", chatSchema);

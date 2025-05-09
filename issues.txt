@@ -20,3 +20,24 @@ const completion = openai.chat.completions.create({
 });
 
 completion.then((result) => console.log(result.choices[0].message));
+
+
+
+
+
+
+
+
+Update socket.js (Frontend Responsibility)
+The server emits encrypted messages, and decryption should occur on the client side using the same key. Update your frontend to:
+Store the encryption key securely (e.g., in local storage or a secure vault) when the chat is started.
+Use CryptoJS.AES.decrypt to decrypt received messages.
+Example frontend code (pseudo-code):
+javascript
+
+Copy
+const socket = io("http://localhost:5000");
+socket.on("message", (data) => {
+  const decryptedMessage = CryptoJS.AES.decrypt(data.message.encryptedMessage, chatEncryptionKey).toString(CryptoJS.enc.Utf8);
+  console.log("Decrypted message:", decryptedMessage);
+});

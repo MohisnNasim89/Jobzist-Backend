@@ -20,7 +20,7 @@ const notificationRoutes = require("./src/routes/notification/notificationRoutes
 const feedRoutes = require("./src/routes/feed/feedRoutes");
 const searchRoutes = require("./src/routes/search/searchRoutes");
 const recommendationRoutes = require("./src/routes/recommendation/recommendationRoutes");
-const chatRoutes = require("./src/routes/chatRoutes");
+const chatRoutes = require("./src/routes/chat/chatRoutes");
 
 dotenv.config();
 const app = express();
@@ -68,7 +68,6 @@ app.use((err, req, res, next) => {
 // Error Middleware
 app.use(errorMiddleware);
 
-// MongoDB Connection and Server Start
 let server;
 connectDB()
   .then(() => {
@@ -85,16 +84,21 @@ connectDB()
   });
 
 // Graceful Shutdown
-process.on("SIGINT", () => {
+process.on("SIGINT", async () => {
   console.log("Shutting down server...");
-  server.close(() => {
+  try {
+    await server.close();
     console.log("Server closed");
+
     const mongoose = require("mongoose");
-    mongoose.connection.close(false, () => {
-      console.log("MongoDB connection closed");
-      process.exit(0);
-    });
-  });
+    await mongoose.connection.close();
+    console.log("MongoDB connection closed");
+
+    process.exit(0);
+  } catch (error) {
+    console.error("Error during shutdown:", error);
+    process.exit(1);
+  }
 });
 
 module.exports = app;

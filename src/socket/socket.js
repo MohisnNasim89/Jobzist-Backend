@@ -2,8 +2,16 @@ const { Server } = require("socket.io");
 const Notification = require("../models/notification/Notification");
 
 const socketMap = new Map();
+let io;
 
-const setupSocket = (io) => {
+const initSocket = (server) => {
+  io = new Server(server, {
+    cors: {
+      origin: "*",
+      methods: ["GET", "POST"],
+    },
+  });
+
   io.on("connection", (socket) => {
     const userId = socket.handshake.query.userId;
     if (userId) {
@@ -19,6 +27,10 @@ const setupSocket = (io) => {
 };
 
 const emitNotification = (userId, notification) => {
+  if (!io) {
+    console.error("Socket.io not initialized. Call initSocket first.");
+    return;
+  }
   const socketId = socketMap.get(userId.toString());
   if (socketId) {
     io.to(socketId).emit("notification", notification);
@@ -26,10 +38,14 @@ const emitNotification = (userId, notification) => {
 };
 
 const emitMessage = (userId, message) => {
+  if (!io) {
+    console.error("Socket.io not initialized. Call initSocket first.");
+    return;
+  }
   const socketId = socketMap.get(userId.toString());
   if (socketId) {
     io.to(socketId).emit("message", message);
   }
 };
 
-module.exports = { setupSocket, emitNotification, emitMessage };
+module.exports = { initSocket, emitNotification, emitMessage };
