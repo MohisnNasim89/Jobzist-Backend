@@ -382,3 +382,31 @@ exports.savePost = async (req, res) => {
     });
   }
 };
+
+exports.togglePostVisibility = async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const { userId } = req.user;
+
+    const post = await checkPostExists(postId);
+    checkPostOwnership(post, userId);
+
+    // Toggle visibility between "private" and "public"
+    const newVisibility = post.visibility === "public" ? "private" : "public";
+    post.visibility = newVisibility;
+    await post.save();
+
+    const populatedPost = await Post.findById(post._id)
+      .populate("userId", "email role")
+      .populate("tags.id", "name");
+
+    return res.status(200).json({
+      message: `Post visibility toggled to ${newVisibility} successfully`,
+      post: populatedPost,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while toggling post visibility",
+    });
+  }
+};

@@ -32,4 +32,6 @@ router.post("/:postId/share", verifyToken, postIdValidationRules, validate, shar
 
 router.post("/:postId/save", verifyToken, postIdValidationRules, validate, savePost);
 
+router.patch("/:postId/visibility", verifyToken, postIdValidationRules, validate, togglePostVisibility);
+
 module.exports = router;

@@ -28,4 +28,6 @@ router.post("/:jobId/hire/:jobSeekerId", verifyToken, jobValidation.validateHire
 
 router.get("/company/:companyId", jobValidation.validateGetCompanyJobs, jobPublicController.getCompanyJobs);
 
+router.patch("/:jobId/status", verifyToken, jobValidation.validateJobId, jobController.toggleJobStatus);
+
 module.exports = router;

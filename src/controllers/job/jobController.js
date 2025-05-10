@@ -295,3 +295,76 @@ exports.hireCandidate = async (req, res) => {
     });
   }
 };
+
+exports.toggleJobStatus = async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const { userId, role } = req.user;
+
+    const job = await checkJobExists(jobId);
+    checkRole(role, ["company_admin", "employer"], "Unauthorized: Only company admins and employers can toggle job status");
+
+    if (role === "employer" && job.postedBy.toString() !== userId) {
+      throw new Error("Unauthorized: You can only toggle status for jobs you posted");
+    }
+
+    if (role === "company_admin") {
+      const companyAdmin = await checkCompanyAdminExists(userId);
+      if (job.companyId && companyAdmin.companyId.toString() !== job.companyId.toString()) {
+        throw new Error("Unauthorized: You can only toggle status for jobs in your company");
+      }
+    }
+
+    // Toggle status between "Open" and "Closed"
+    const newStatus = job.status === "Open" ? "Closed" : "Open";
+    job.status = newStatus;
+    await job.save();
+
+    // Notify applicants regardless of the new status
+    if (job.applicants.length > 0) {
+      const notificationMessage = newStatus === "Open"
+        ? `The job "${job.title}" is now open for applications.`
+        : `Applications for the job "${job.title}" are now closed.`;
+      const applicantNotifications = job.applicants.map((applicant) => ({
+        userId: applicant.userId,
+        type: "applicationUpdate",
+        relatedId: job._id,
+        message: notificationMessage,
+        createdAt: new Date(),
+      }));
+      await Notification.insertMany(applicantNotifications);
+      applicantNotifications.forEach((notification) => {
+        emitNotification(notification.userId.toString(), notification);
+      });
+    }
+
+    const company = job.companyId ? await Company.findOne({ _id: job.companyId, isDeleted: false }) : null;
+
+    const jobProfile = renderProfileWithFallback(job, "job", {
+      _id: job._id,
+      title: job.title,
+      companyId: job.companyId,
+      company: company ? { _id: company._id, name: company.name, logo: company.logo } : null,
+      postedBy: job.postedBy,
+      description: job.description,
+      location: job.location,
+      jobType: job.jobType,
+      salary: job.salary,
+      requirements: job.requirements,
+      skills: job.skills,
+      experienceLevel: job.experienceLevel,
+      applicationDeadline: job.applicationDeadline,
+      status: job.status,
+      updatedAt: job.updatedAt,
+    });
+
+    res.status(200).json({
+      message: `Job application status toggled to ${newStatus} successfully`,
+      job: jobProfile,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while toggling job status",
+    });
+  }
+};
