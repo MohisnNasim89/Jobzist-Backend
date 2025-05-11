@@ -30,4 +30,12 @@ router.get("/company/:companyId", jobValidation.validateGetCompanyJobs, jobPubli
 
 router.patch("/:jobId/status", verifyToken, jobValidation.validateJobId, jobController.toggleJobStatus);
 
+router.get("/:jobId/applicant/:jobSeekerId/resume/preview", verifyToken, jobValidation.validateJobId, jobController.previewApplicantResume);
+
+router.get("/:jobId/applicant/:jobSeekerId/resume/download", verifyToken, jobValidation.validateJobId, jobController.downloadApplicantResume);
+
+router.post("/:jobId/ats-score", verifyToken, jobValidation.validateJobId, jobJobSeekerController.getATSScoreAndSuggestions);
+
+router.post("/:jobId/cover-letter", verifyToken, jobValidation.validateJobId, jobJobSeekerController.generateCoverLetterForJob);
+
 module.exports = router;

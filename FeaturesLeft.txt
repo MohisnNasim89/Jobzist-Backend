@@ -14,3 +14,12 @@ Features Left:
 
 
 when Applying to job user need to upload a resume, cover letter, ATS score All these things are visible to employers    
+
+
+
+GPT MODELS:
+    gpt-4.1-nano
+        $0.10
+        $0.025
+        $0.40
+    

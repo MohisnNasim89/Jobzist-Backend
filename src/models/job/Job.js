@@ -15,7 +15,10 @@ const salarySchema = new mongoose.Schema({
 const applicantSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "JobSeeker", required: true },
   appliedAt: { type: Date, default: Date.now },
+  resume: { type: String, required: true },
   status: { type: String, enum: ["Applied", "Under Review", "Interview", "Hired", "Rejected"], default: "Applied" },
+  coverLetter: { type: String, required: true }, 
+  atsScore: { type: Number, default: null },
 });
 
 const savedJobSchema = new mongoose.Schema({
@@ -40,19 +43,17 @@ const jobSchema = new mongoose.Schema(
     requirements: [{ type: String }],
     skills: [{ type: String }],
     experienceLevel: { type: String, enum: ["Entry-Level", "Mid-Level", "Senior-Level"], required: true },
-    applicants: [applicantSchema], // Renamed from applications
+    applicants: [applicantSchema],
     savedBy: [savedJobSchema],
     hiredCandidates: [hiredCandidateSchema],
     applicationDeadline: { type: Date, required: true },
-    status: { type: String, enum: ["Draft", "Open", "Closed"], default: "Draft" }, // Added Draft status
+    status: { type: String, enum: ["Draft", "Open", "Closed"], default: "Open" },
   },
   { timestamps: true }
 );
 
-// Apply soft delete middleware
 applySoftDelete(jobSchema);
 
-// Add indexes for faster queries
 jobSchema.index({ companyId: 1 });
 jobSchema.index({ postedBy: 1 });
 jobSchema.index({ status: 1 });

@@ -3,6 +3,7 @@ const Company = require("../../models/company/Company");
 const JobSeeker = require("../../models/user/JobSeeker");
 const UserProfile = require("../../models/user/UserProfile");
 const Notification = require("../../models/notification/Notification");
+const Resume = require("../../models/resume/ResumeModel");
 
 const {
   checkUserExists,
@@ -315,12 +316,10 @@ exports.toggleJobStatus = async (req, res) => {
       }
     }
 
-    // Toggle status between "Open" and "Closed"
     const newStatus = job.status === "Open" ? "Closed" : "Open";
     job.status = newStatus;
     await job.save();
 
-    // Notify applicants regardless of the new status
     if (job.applicants.length > 0) {
       const notificationMessage = newStatus === "Open"
         ? `The job "${job.title}" is now open for applications.`
@@ -365,6 +364,90 @@ exports.toggleJobStatus = async (req, res) => {
   } catch (error) {
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while toggling job status",
+    });
+  }
+};
+
+exports.previewApplicantResume = async (req, res) => {
+  try {
+    const { jobId, jobSeekerId } = req.params;
+    const { userId, role } = req.user;
+
+    checkRole(role, ["employer"], "Unauthorized: Only employers can preview resumes");
+
+    const job = await checkJobExists(jobId);
+    if (job.postedBy.toString() !== userId) {
+      throw new Error("Unauthorized: You can only preview resumes for jobs you posted");
+    }
+
+    const applicant = job.applicants.find((applicant) => applicant.userId.toString() === jobSeekerId.toString());
+    if (!applicant) {
+      throw new Error("This job seeker has not applied for the job");
+    }
+
+    const resume = await Resume.findOne({ userId: jobSeekerId, isDeleted: false });
+    if (!resume) {
+      throw new Error("Resume not found for this job seeker");
+    }
+
+    res.status(200).json({
+      message: "Resume preview retrieved successfully",
+      resume: {
+        userId: resume.userId,
+        fullName: resume.fullName,
+        bio: resume.bio,
+        location: resume.location,
+        contactInformation: resume.contactInformation,
+        socialLinks: resume.socialLinks,
+        education: resume.education,
+        experiences: resume.experiences,
+        projects: resume.projects,
+        skills: resume.skills,
+        uploadedResume: resume.uploadedResume,
+      },
+      coverLetter: applicant.coverLetter,
+      atsScore: applicant.atsScore,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while previewing the resume",
+    });
+  }
+};
+
+exports.downloadApplicantResume = async (req, res) => {
+  try {
+    const { jobId, jobSeekerId } = req.params;
+    const { userId, role } = req.user;
+
+    checkRole(role, ["employer"], "Unauthorized: Only employers can download resumes");
+
+    const job = await checkJobExists(jobId);
+    if (job.postedBy.toString() !== userId) {
+      throw new Error("Unauthorized: You can only download resumes for jobs you posted");
+    }
+
+    const applicant = job.applicants.find((applicant) => applicant.userId.toString() === jobSeekerId.toString());
+    if (!applicant) {
+      throw new Error("This job seeker has not applied for the job");
+    }
+
+    const resume = await Resume.findOne({ userId: jobSeekerId, isDeleted: false });
+    if (!resume) {
+      throw new Error("Resume not found for this job seeker");
+    }
+
+    if (!resume.uploadedResume) {
+      throw new Error("No uploaded resume file available for download");
+    }
+
+    res.status(200).json({
+      message: "Resume download link retrieved successfully",
+      downloadUrl: resume.uploadedResume,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while retrieving the resume download link",
     });
   }
 };

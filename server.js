@@ -21,6 +21,7 @@ const feedRoutes = require("./src/routes/feed/feedRoutes");
 const searchRoutes = require("./src/routes/search/searchRoutes");
 const recommendationRoutes = require("./src/routes/recommendation/recommendationRoutes");
 const chatRoutes = require("./src/routes/chat/chatRoutes");
+const resumeRoutes = require("./src/routes/resume/resumeRoutes");
 
 dotenv.config();
 const app = express();
@@ -47,6 +48,7 @@ app.use("/api/feed", feedRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/recommendations", recommendationRoutes);
 app.use("/api/chats", chatRoutes);
+app.use("/api/resume", resumeRoutes);
 
 // Root Route
 app.get("/", (req, res) => {

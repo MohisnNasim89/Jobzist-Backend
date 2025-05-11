@@ -17,7 +17,7 @@ const experienceSchema = new mongoose.Schema({
 });
 
 const jobPreferencesSchema = new mongoose.Schema({
-  jobType: { type: [String], enum: {values: ["Full-Time", "Part-Time", "Contract", "Internship"], message: "{VALUE} is not a valid job type",} },
+  jobType: { type: [String], enum: { values: ["Full-Time", "Part-Time", "Contract", "Internship"], message: "{VALUE} is not a valid job type" } },
   location: { type: String },
   salaryExpectation: { type: Number },
 });
@@ -25,6 +25,8 @@ const jobPreferencesSchema = new mongoose.Schema({
 const appliedJobSchema = new mongoose.Schema({
   jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true },
   appliedAt: { type: Date, default: Date.now },
+  coverLetter: { type: String, required: true }, 
+  atsScore: { type: Number, default: null },
 });
 
 const savedJobSchema = new mongoose.Schema({
@@ -36,6 +38,14 @@ const projectsSchema = new mongoose.Schema({
   title: { type: String, required: true },
   description: { type: String, required: true },
   link: { type: String, required: true },
+});
+
+const pendingApplicationSchema = new mongoose.Schema({
+  jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true },
+  atsScore: { type: Number, default: null },
+  improvementSuggestions: { type: String, default: null },
+  coverLetter: { type: String, default: null },
+  updatedAt: { type: Date, default: Date.now },
 });
 
 const jobSeekerSchema = new mongoose.Schema(
@@ -60,6 +70,7 @@ const jobSeekerSchema = new mongoose.Schema(
     jobPreferences: jobPreferencesSchema,
     appliedJobs: [appliedJobSchema],
     savedJobs: [savedJobSchema],
+    pendingApplications: [pendingApplicationSchema], // Store temporary ATS scores, suggestions, and cover letters
     status: {
       type: String,
       enum: ["Open to Work", "Not Looking", "Hired"],

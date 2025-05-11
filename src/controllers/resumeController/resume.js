@@ -1,19 +1,18 @@
 const Resume = require("../../models/resume/ResumeModel");
 const User = require("../../models/user/Users");
+const JobSeeker = require("../../models/user/JobSeeker"); // Add JobSeeker model import
 const { checkUserExists, checkRole } = require("../../utils/checks");
-const { Configuration, OpenAIApi } = require("openai");
+const { genAI } = require("genai");
 require("dotenv").config();
 
-// Initialize OpenAI API
-const configuration = new Configuration({
+const genAI = new GoogleGenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-const openai = new OpenAIApi(configuration);
 
 exports.generateResume = async (req, res) => {
   try {
     const { userId, role } = req.user;
-    const {
+    let {
       fullName,
       bio,
       location,
@@ -35,13 +34,64 @@ exports.generateResume = async (req, res) => {
       throw new Error("You already have a resume. Please edit the existing one.");
     }
 
+    // Check if req.body is empty (no data provided)
+    const isBodyEmpty = Object.keys(req.body).length === 0;
+
+    if (isBodyEmpty) {
+      // Fetch user data from User model
+      const user = await User.findById(userId);
+      if (!user) {
+        throw new Error("User not found");
+      }
+
+      // Fetch job seeker data from JobSeeker model
+      const jobSeeker = await JobSeeker.findOne({ userId, isDeleted: false });
+      if (!jobSeeker) {
+        throw new Error("Job seeker profile not found. Please create a job seeker profile first.");
+      }
+
+      // Populate fields from JobSeeker and User models
+      fullName = user.fullName || "Not provided";
+      bio = jobSeeker.bio || "Not provided";
+      location = jobSeeker.jobPreferences?.location || "Not provided";
+      contactInformation = {
+        email: user.email || "Not provided",
+        phone: jobSeeker.contactInformation?.phone || "Not provided",
+      };
+      socialLinks = jobSeeker.socialLinks || [];
+      education = jobSeeker.education.map((edu) => ({
+        institution: edu.institution,
+        degree: edu.degree,
+        fieldOfStudy: edu.fieldOfStudy || "Not specified",
+        startDate: edu.startYear ? `${edu.startYear}-01-01` : "Not provided",
+        endDate: edu.endYear ? `${edu.endYear}-12-31` : "Not provided",
+        description: edu.description || "Not provided",
+      }));
+      experiences = jobSeeker.experience.map((exp) => ({
+        company: exp.company,
+        position: exp.title,
+        startDate: exp.startDate ? exp.startDate.toISOString().split("T")[0] : "Not provided",
+        endDate: exp.endDate ? exp.endDate.toISOString().split("T")[0] : "Not provided",
+        description: exp.description || "Not provided",
+      }));
+      projects = jobSeeker.projects.map((proj) => ({
+        title: proj.title,
+        description: proj.description,
+        technologies: proj.technologies || [],
+        startDate: proj.startDate ? proj.startDate.toISOString().split("T")[0] : "Not provided",
+        endDate: proj.endDate ? proj.endDate.toISOString().split("T")[0] : "Not provided",
+        link: proj.link,
+      }));
+      skills = jobSeeker.skills || [];
+    }
+
     // Prepare the prompt for GPT-4o
     const prompt = `
       You are an expert resume generator. Create a structured resume in JSON format based on the following data:
-      - Full Name: ${fullName}
+      - Full Name: ${fullName || "Not provided"}
       - Bio: ${bio || "Not provided"}
       - Location: ${location || "Not provided"}
-      - Contact Information: ${JSON.stringify(contactInformation)}
+      - Contact Information: ${JSON.stringify(contactInformation || { email: "Not provided", phone: "Not provided" })}
       - Social Links: ${JSON.stringify(socialLinks || [])}
       - Education: ${JSON.stringify(education || [])}
       - Experiences: ${JSON.stringify(experiences || [])}
@@ -67,7 +117,7 @@ exports.generateResume = async (req, res) => {
     `;
 
     // Call OpenAI GPT-4o
-    const response = await openai.createChatCompletion({
+    const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         { role: "system", content: "You are a professional resume generator." },
@@ -77,7 +127,7 @@ exports.generateResume = async (req, res) => {
       temperature: 0.7,
     });
 
-    const generatedResume = JSON.parse(response.data.choices[0].message.content).resume;
+    const generatedResume = JSON.parse(response.choices[0].message.content).resume;
 
     // Create new resume document
     resume = new Resume({

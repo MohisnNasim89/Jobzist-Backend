@@ -1,5 +1,6 @@
 const Job = require("../../models/job/Job");
 const JobSeeker = require("../../models/user/JobSeeker");
+const Resume = require("../../models/resume/ResumeModel");
 const Notification = require("../../models/notification/Notification");
 const {
   checkRole,
@@ -8,16 +9,117 @@ const {
   renderProfileWithFallback,
 } = require("../../utils/checks");
 const { emitNotification } = require("../../socket/socket");
+const { OpenAI } = require("openai");
+require("dotenv").config();
 
-exports.applyForJob = async (req, res) => {
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// Helper function to calculate ATS score and provide improvement suggestions
+const calculateATSScoreAndSuggestions = async (resume, job) => {
+  try {
+    const prompt = `
+      You are an ATS (Applicant Tracking System) expert. Evaluate the following resume against the job description and requirements to calculate an ATS compatibility score (0-100) and provide improvement suggestions to better align the resume with the job.
+
+      **Job Details:**
+      - Title: ${job.title}
+      - Description: ${job.description}
+      - Skills: ${JSON.stringify(job.skills)}
+      - Requirements: ${JSON.stringify(job.requirements)}
+      - Experience Level: ${job.experienceLevel}
+
+      **Resume Details:**
+      - Full Name: ${resume.fullName}
+      - Bio: ${resume.bio || "Not provided"}
+      - Skills: ${JSON.stringify(resume.skills)}
+      - Experiences: ${JSON.stringify(resume.experiences)}
+      - Projects: ${JSON.stringify(resume.projects)}
+      - Education: ${JSON.stringify(resume.education)}
+
+      Provide the response in the following JSON format:
+      {
+        "atsScore": <number>,
+        "improvementSuggestions": "<string>"
+      }
+      The ATS score should be a number between 0 and 100, reflecting keyword matches, skill alignment, and experience relevance. The improvement suggestions should be concise and actionable (100-150 words).
+    `;
+
+    const response = await openai.createChatCompletion({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: "You are an ATS evaluation expert." },
+        { role: "user", content: prompt },
+      ],
+      max_tokens: 300,
+      temperature: 0.5,
+    });
+
+    const result = JSON.parse(response.data.choices[0].message.content.trim());
+    return {
+      atsScore: Math.max(0, Math.min(100, result.atsScore)),
+      improvementSuggestions: result.improvementSuggestions,
+    };
+  } catch (error) {
+    console.error("Error calculating ATS score and suggestions:", error);
+    return { atsScore: null, improvementSuggestions: "Unable to generate suggestions due to an error." };
+  }
+};
+
+// Helper function to generate cover letter
+const generateCoverLetter = async (resume, job, userProfile) => {
+  try {
+    const prompt = `
+      You are a professional cover letter writer. Generate a professional cover letter for the following job seeker applying to the specified job. The cover letter should be concise (200-300 words), tailored to the job, and highlight the job seeker's relevant skills and experiences.
+
+      **Job Details:**
+      - Title: ${job.title}
+      - Company: ${job.companyId ? (await require("../../models/company/Company").findById(job.companyId)).name : "Unknown Company"}
+      - Description: ${job.description}
+      - Skills: ${JSON.stringify(job.skills)}
+      - Requirements: ${JSON.stringify(job.requirements)}
+      - Experience Level: ${job.experienceLevel}
+
+      **Job Seeker Details:**
+      - Full Name: ${resume.fullName}
+      - Bio: ${resume.bio || "Not provided"}
+      - Skills: ${JSON.stringify(resume.skills)}
+      - Experiences: ${JSON.stringify(resume.experiences)}
+      - Projects: ${JSON.stringify(resume.projects)}
+      - Education: ${JSON.stringify(resume.education)}
+
+      **User Profile:**
+      - Full Name: ${userProfile.fullName}
+      - Contact Information: ${JSON.stringify(resume.contactInformation)}
+
+      Provide the cover letter as plain text, addressed to the hiring manager, with a professional tone.
+    `;
+
+    const response = await openai.createChatCompletion({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: "You are a professional cover letter writer." },
+        { role: "user", content: prompt },
+      ],
+      max_tokens: 500,
+      temperature: 0.7,
+    });
+
+    return response.data.choices[0].message.content.trim();
+  } catch (error) {
+    console.error("Error generating cover letter:", error);
+    throw new Error("Failed to generate cover letter");
+  }
+};
+
+exports.getATSScoreAndSuggestions = async (req, res) => {
   try {
     const { jobId } = req.params;
     const { userId, role } = req.user;
 
-    checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can apply for jobs");
+    checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can calculate ATS scores");
 
-    const jobQuery = checkJobExists(jobId);
-    const job = await jobQuery.exec();
+    const job = await checkJobExists(jobId);
     if (!job) {
       const error = new Error("Job not found");
       error.status = 404;
@@ -28,6 +130,143 @@ exports.applyForJob = async (req, res) => {
     if (!jobSeeker) {
       const error = new Error("Job seeker profile not found");
       error.status = 404;
+      throw error;
+    }
+
+    const resume = await Resume.findOne({ userId, isDeleted: false });
+    if (!resume) {
+      const error = new Error("You must have a resume to calculate ATS score");
+      error.status = 400;
+      throw error;
+    }
+
+    const { atsScore, improvementSuggestions } = await calculateATSScoreAndSuggestions(resume, job);
+
+    // Update or add to pendingApplications
+    const pendingAppIndex = jobSeeker.pendingApplications.findIndex(
+      (app) => app.jobId.toString() === jobId.toString()
+    );
+    if (pendingAppIndex !== -1) {
+      jobSeeker.pendingApplications[pendingAppIndex].atsScore = atsScore;
+      jobSeeker.pendingApplications[pendingAppIndex].improvementSuggestions = improvementSuggestions;
+      jobSeeker.pendingApplications[pendingAppIndex].updatedAt = new Date();
+    } else {
+      jobSeeker.pendingApplications.push({
+        jobId,
+        atsScore,
+        improvementSuggestions,
+        updatedAt: new Date(),
+      });
+    }
+
+    await jobSeeker.save();
+
+    res.status(200).json({
+      message: "ATS score and suggestions generated successfully",
+      atsScore,
+      improvementSuggestions,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while calculating ATS score",
+    });
+  }
+};
+
+exports.generateCoverLetterForJob = async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const { userId, role } = req.user;
+
+    checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can generate cover letters");
+
+    const job = await checkJobExists(jobId);
+    if (!job) {
+      const error = new Error("Job not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const jobSeeker = await checkJobSeekerExists(userId);
+    if (!jobSeeker) {
+      const error = new Error("Job seeker profile not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const resume = await Resume.findOne({ userId, isDeleted: false });
+    if (!resume) {
+      const error = new Error("You must have a resume to generate a cover letter");
+      error.status = 400;
+      throw error;
+    }
+
+    const userProfile = await require("../../models/user/UserProfile").findOne({ userId });
+    const coverLetter = await generateCoverLetter(resume, job, userProfile);
+
+    // Update or add to pendingApplications
+    const pendingAppIndex = jobSeeker.pendingApplications.findIndex(
+      (app) => app.jobId.toString() === jobId.toString()
+    );
+    if (pendingAppIndex !== -1) {
+      jobSeeker.pendingApplications[pendingAppIndex].coverLetter = coverLetter;
+      jobSeeker.pendingApplications[pendingAppIndex].updatedAt = new Date();
+    } else {
+      jobSeeker.pendingApplications.push({
+        jobId,
+        coverLetter,
+        updatedAt: new Date(),
+      });
+    }
+
+    await jobSeeker.save();
+
+    res.status(200).json({
+      message: "Cover letter generated successfully",
+      coverLetter,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while generating the cover letter",
+    });
+  }
+};
+
+exports.applyForJob = async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const { userId, role } = req.user;
+
+    checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can apply for jobs");
+
+    const job = await checkJobExists(jobId);
+    if (!job) {
+      const error = new Error("Job not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const jobSeeker = await checkJobSeekerExists(userId);
+    if (!jobSeeker) {
+      const error = new Error("Job seeker profile not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const resume = await Resume.findOne({ userId, isDeleted: false });
+    if (!resume) {
+      const error = new Error("You must have a resume to apply for a job");
+      error.status = 400;
+      throw error;
+    }
+
+    // Check for a pending application with a cover letter
+    const pendingApp = jobSeeker.pendingApplications.find(
+      (app) => app.jobId.toString() === jobId.toString()
+    );
+    if (!pendingApp || !pendingApp.coverLetter) {
+      const error = new Error("You must generate a cover letter before applying");
+      error.status = 400;
       throw error;
     }
 
@@ -45,7 +284,7 @@ exports.applyForJob = async (req, res) => {
     }
 
     const existingApplicationIndex = job.applicants.findIndex(
-      (applicant) => applicant.mongoId.toString() === userId.toString()
+      (applicant) => applicant.userId.toString() === userId.toString()
     );
     const existingJobSeekerApplicationIndex = jobSeeker.appliedJobs.findIndex(
       (appliedJob) => appliedJob.jobId.toString() === jobId.toString()
@@ -55,10 +294,35 @@ exports.applyForJob = async (req, res) => {
     if (existingApplicationIndex !== -1 && existingJobSeekerApplicationIndex !== -1) {
       job.applicants.splice(existingApplicationIndex, 1);
       jobSeeker.appliedJobs.splice(existingJobSeekerApplicationIndex, 1);
+      // Remove from pendingApplications
+      jobSeeker.pendingApplications = jobSeeker.pendingApplications.filter(
+        (app) => app.jobId.toString() !== jobId.toString()
+      );
       message = "Application canceled successfully";
     } else if (existingApplicationIndex === -1 && existingJobSeekerApplicationIndex === -1) {
-      job.applicants.push({ mongoId: userId, appliedAt: new Date(), status: "Applied" });
-      jobSeeker.appliedJobs.push({ jobId });
+      // Use the stored cover letter and ATS score
+      const coverLetter = pendingApp.coverLetter;
+      const atsScore = pendingApp.atsScore;
+
+      job.applicants.push({
+        userId,
+        appliedAt: new Date(),
+        status: "Applied",
+        coverLetter,
+        atsScore,
+      });
+      jobSeeker.appliedJobs.push({ 
+        jobId,
+        appliedAt: new Date(),
+        coverLetter,
+        atsScore,
+      });
+
+      // Remove from pendingApplications after applying
+      jobSeeker.pendingApplications = jobSeeker.pendingApplications.filter(
+        (app) => app.jobId.toString() !== jobId.toString()
+      );
+
       message = "Application submitted successfully";
     } else {
       const error = new Error("Application state is inconsistent. Please contact support.");
@@ -232,6 +496,8 @@ exports.getAppliedJobs = async (req, res) => {
         return {
           ...jobProfile,
           appliedAt: appliedJob.appliedAt,
+          coverLetter: appliedJob.coverLetter,
+          atsScore: appliedJob.atsScore,
         };
       });
 
