@@ -1,10 +1,16 @@
 Features Left:
 
-24.	Provide an AI Resume Maker that auto-generates professional resumes based on job-seekers skill.
-26.	Allow job seekers to upload and edit resumes, but a job-seeker should have a single resume.
+24.	Provide an AI Resume Maker that auto-generates professional resumes based on job-seekers skill, experiences, projects, education, social links, contact information, full name, bio, location. done
+
+26.	Allow job seekers to upload and edit resumes, but a job-seeker should have a single resume. done
+
 28.	Allow employers to download or preview resumes before shortlisting candidates.
 
 32.	Allow job seekers to add or generate cover letters while applying for jobs.
+
 33.	Implement an auto-fill feature that lets job seekers apply with a pre-saved resume and profile details in one click.
 
-37.	Provide an AI-powered resume scoring system for ATS ranking
+37.	Provide an AI-powered resume scoring system for ATS ranking.
+
+
+when Applying to job user need to upload a resume, cover letter, ATS score All these things are visible to employers    

@@ -150,6 +150,7 @@ exports.updateUserProfile = async (req, res) => {
           "skills",
           "education",
           "experience",
+          "projects",
           "jobPreferences",
           "status",
         ],

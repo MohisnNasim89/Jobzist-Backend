@@ -8,7 +8,7 @@ const {
   validate,
 } = require("../../validations/postValidation");
 const { createPost, getPost, getUserPosts, updatePost, deletePost, 
-      likePost, commentOnPost, deleteComment, sharePost, savePost,} = require("../../controllers/post/postController");
+      likePost, commentOnPost, deleteComment, sharePost, savePost, togglePostVisibility} = require("../../controllers/post/postController");
 
 const router = express.Router();
 

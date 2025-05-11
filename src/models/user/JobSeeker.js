@@ -32,6 +32,12 @@ const savedJobSchema = new mongoose.Schema({
   savedAt: { type: Date, default: Date.now },
 });
 
+const projectsSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  description: { type: String, required: true },
+  link: { type: String, required: true },
+});
+
 const jobSeekerSchema = new mongoose.Schema(
   {
     userId: {
@@ -50,6 +56,7 @@ const jobSeekerSchema = new mongoose.Schema(
     },
     education: [educationSchema],
     experience: [experienceSchema],
+    projects: [projectsSchema],
     jobPreferences: jobPreferencesSchema,
     appliedJobs: [appliedJobSchema],
     savedJobs: [savedJobSchema],
