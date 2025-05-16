@@ -6,6 +6,7 @@ const educationSchema = new mongoose.Schema({
   institution: { type: String, required: true },
   startYear: { type: Number, required: true },
   endYear: { type: Number },
+  description: { type: String },
 });
 
 const experienceSchema = new mongoose.Schema({
@@ -36,6 +37,7 @@ const savedJobSchema = new mongoose.Schema({
 
 const projectsSchema = new mongoose.Schema({
   title: { type: String, required: true },
+  summary: { type: String },
   description: { type: String, required: true },
   link: { type: String, required: true },
 });
@@ -70,7 +72,7 @@ const jobSeekerSchema = new mongoose.Schema(
     jobPreferences: jobPreferencesSchema,
     appliedJobs: [appliedJobSchema],
     savedJobs: [savedJobSchema],
-    pendingApplications: [pendingApplicationSchema], // Store temporary ATS scores, suggestions, and cover letters
+    pendingApplications: [pendingApplicationSchema],
     status: {
       type: String,
       enum: ["Open to Work", "Not Looking", "Hired"],

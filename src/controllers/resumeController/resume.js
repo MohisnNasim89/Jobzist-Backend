@@ -1,57 +1,50 @@
 const Resume = require("../../models/resume/ResumeModel");
 const User = require("../../models/user/Users");
-const JobSeeker = require("../../models/user/JobSeeker"); // Add JobSeeker model import
+const JobSeeker = require("../../models/user/JobSeeker");
 const { checkUserExists, checkRole } = require("../../utils/checks");
-const { genAI } = require("genai");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 require("dotenv").config();
 
-const genAI = new GoogleGenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Initialize Gemini 2.0 Flash
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 exports.generateResume = async (req, res) => {
   try {
     const { userId, role } = req.user;
     let {
-      fullName,
-      bio,
-      location,
-      contactInformation,
-      socialLinks,
-      education,
       experiences,
       projects,
       skills,
     } = req.body;
 
-    // Authorization checks
     await checkUserExists(userId);
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can generate resumes");
 
-    // Check if user already has a resume
-    let resume = await Resume.findOne({ userId, isDeleted: false });
+    let resume = await Resume.findOne({ userId });
     if (resume) {
       throw new Error("You already have a resume. Please edit the existing one.");
     }
 
-    // Check if req.body is empty (no data provided)
     const isBodyEmpty = Object.keys(req.body).length === 0;
 
     if (isBodyEmpty) {
-      // Fetch user data from User model
       const user = await User.findById(userId);
       if (!user) {
         throw new Error("User not found");
       }
 
-      // Fetch job seeker data from JobSeeker model
       const jobSeeker = await JobSeeker.findOne({ userId, isDeleted: false });
       if (!jobSeeker) {
         throw new Error("Job seeker profile not found. Please create a job seeker profile first.");
       }
 
-      // Populate fields from JobSeeker and User models
-      fullName = user.fullName || "Not provided";
+      const userProfile = await User.findOne({ userId, isDeleted: false });
+      if (!userProfile) {
+        throw new Error("User profile not found. Please create a user profile first."); 
+      }
+
+      fullName = userProfile.fullName || "Not provided";
       bio = jobSeeker.bio || "Not provided";
       location = jobSeeker.jobPreferences?.location || "Not provided";
       contactInformation = {
@@ -62,7 +55,6 @@ exports.generateResume = async (req, res) => {
       education = jobSeeker.education.map((edu) => ({
         institution: edu.institution,
         degree: edu.degree,
-        fieldOfStudy: edu.fieldOfStudy || "Not specified",
         startDate: edu.startYear ? `${edu.startYear}-01-01` : "Not provided",
         endDate: edu.endYear ? `${edu.endYear}-12-31` : "Not provided",
         description: edu.description || "Not provided",
@@ -85,7 +77,7 @@ exports.generateResume = async (req, res) => {
       skills = jobSeeker.skills || [];
     }
 
-    // Prepare the prompt for GPT-4o
+    // Prepare the prompt for Gemini 2.0 Flash
     const prompt = `
       You are an expert resume generator. Create a structured resume in JSON format based on the following data:
       - Full Name: ${fullName || "Not provided"}
@@ -113,41 +105,39 @@ exports.generateResume = async (req, res) => {
         }
       }
 
-      Ensure all dates are in "YYYY-MM-DD" format. Enhance the bio and descriptions to be professional and concise if needed.
-    `;
+      Ensure all dates are in "YYYY-MM-DD" format. Enhance the bio and descriptions to be professional and concise if needed. Return only the JSON content without any additional formatting`
+    ;
 
-    // Call OpenAI GPT-4o
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: "You are a professional resume generator." },
-        { role: "user", content: prompt },
-      ],
-      max_tokens: 1500,
-      temperature: 0.7,
-    });
+    const result = await model.generateContent(prompt);
+    const response = result.response;
+    let text = response.text().trim();
 
-    const generatedResume = JSON.parse(response.choices[0].message.content).resume;
+    // Remove Markdown code block markers if present
+    if (text.startsWith("```json") && text.endsWith("```")) {
+      text = text.replace(/```json\s*|\s*```/g, "").trim();
+    }
+
+    const generatedResume = JSON.parse(text);
 
     // Create new resume document
     resume = new Resume({
       userId,
-      fullName: generatedResume.fullName,
-      bio: generatedResume.bio,
-      location: generatedResume.location,
-      contactInformation: generatedResume.contactInformation,
-      socialLinks: generatedResume.socialLinks,
-      education: generatedResume.education,
-      experiences: generatedResume.experiences,
-      projects: generatedResume.projects,
-      skills: generatedResume.skills,
+      fullName: generatedResume.resume.fullName,
+      bio: generatedResume.resume.bio,
+      location: generatedResume.resume.location,
+      contactInformation: generatedResume.resume.contactInformation,
+      socialLinks: generatedResume.resume.socialLinks,
+      education: generatedResume.resume.education,
+      experiences: generatedResume.resume.experiences,
+      projects: generatedResume.resume.projects,
+      skills: generatedResume.resume.skills,
     });
 
     await resume.save();
 
     res.status(201).json({
       message: "Resume generated successfully",
-      resume: generatedResume,
+      resume: generatedResume.resume,
     });
   } catch (error) {
     res.status(error.status || 500).json({
@@ -156,6 +146,7 @@ exports.generateResume = async (req, res) => {
   }
 };
 
+// Rest of the file remains unchanged
 exports.uploadResume = async (req, res) => {
   try {
     const { userId, role } = req.user;
@@ -270,7 +261,7 @@ exports.getResume = async (req, res) => {
     await checkUserExists(userId);
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can view their resume");
 
-    const resume = await Resume.findOne({ userId, isDeleted: false });
+    const resume = await Resume.findOne({ userId });
     if (!resume) {
       throw new Error("No resume found");
     }
@@ -306,8 +297,8 @@ exports.deleteResume = async (req, res) => {
     await checkUserExists(userId);
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can delete their resume");
 
-    // Find and soft delete the resume
-    const resume = await Resume.findOne({ userId, isDeleted: false });
+    console.log("User ID:", userId);
+    const resume = await Resume.findOne({ userId });
     if (!resume) {
       throw new Error("No resume found to delete");
     }

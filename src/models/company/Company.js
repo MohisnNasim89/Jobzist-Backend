@@ -16,6 +16,10 @@ const jobListingSchema = new mongoose.Schema({
   jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true },
 });
 
+const companyEmployeesSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+})
+
 const companySchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -37,6 +41,7 @@ const companySchema = new mongoose.Schema(
     socialLinks: [socialLinkSchema],
     logo: { type: String },
     jobListings: [jobListingSchema],
+    companyEmployees: [companyEmployeesSchema],
   },
   { timestamps: true }
 );

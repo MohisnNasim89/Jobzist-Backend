@@ -1,22 +1,18 @@
 const Job = require("../../models/job/Job");
 const JobSeeker = require("../../models/user/JobSeeker");
 const Resume = require("../../models/resume/ResumeModel");
-const Notification = require("../../models/notification/Notification");
 const {
   checkRole,
   checkJobExists,
   checkJobSeekerExists,
   renderProfileWithFallback,
 } = require("../../utils/checks");
-const { emitNotification } = require("../../socket/socket");
-const { OpenAI } = require("openai");
+const { GoogleGenerativeAI } = require("@google/generative-ai"); 
 require("dotenv").config();
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-// Helper function to calculate ATS score and provide improvement suggestions
 const calculateATSScoreAndSuggestions = async (resume, job) => {
   try {
     const prompt = `
@@ -45,20 +41,18 @@ const calculateATSScoreAndSuggestions = async (resume, job) => {
       The ATS score should be a number between 0 and 100, reflecting keyword matches, skill alignment, and experience relevance. The improvement suggestions should be concise and actionable (100-150 words).
     `;
 
-    const response = await openai.createChatCompletion({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: "You are an ATS evaluation expert." },
-        { role: "user", content: prompt },
-      ],
-      max_tokens: 300,
-      temperature: 0.5,
-    });
+    const result = await model.generateContent(prompt);
+    const response = result.response;
+    let text = response.text().trim();
 
-    const result = JSON.parse(response.data.choices[0].message.content.trim());
+    if (text.startsWith("```json") && text.endsWith("```")) {
+      text = text.replace(/```json\s*|\s*```/g, "").trim();
+    }
+
+    const parsedResult = JSON.parse(text);
     return {
-      atsScore: Math.max(0, Math.min(100, result.atsScore)),
-      improvementSuggestions: result.improvementSuggestions,
+      atsScore: Math.max(0, Math.min(100, parsedResult.atsScore)),
+      improvementSuggestions: parsedResult.improvementSuggestions,
     };
   } catch (error) {
     console.error("Error calculating ATS score and suggestions:", error);
@@ -66,7 +60,6 @@ const calculateATSScoreAndSuggestions = async (resume, job) => {
   }
 };
 
-// Helper function to generate cover letter
 const generateCoverLetter = async (resume, job, userProfile) => {
   try {
     const prompt = `
@@ -95,17 +88,9 @@ const generateCoverLetter = async (resume, job, userProfile) => {
       Provide the cover letter as plain text, addressed to the hiring manager, with a professional tone.
     `;
 
-    const response = await openai.createChatCompletion({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: "You are a professional cover letter writer." },
-        { role: "user", content: prompt },
-      ],
-      max_tokens: 500,
-      temperature: 0.7,
-    });
-
-    return response.data.choices[0].message.content.trim();
+    const result = await model.generateContent(prompt);
+    const response = result.response;
+    return response.text().trim();
   } catch (error) {
     console.error("Error generating cover letter:", error);
     throw new Error("Failed to generate cover letter");
@@ -133,7 +118,7 @@ exports.getATSScoreAndSuggestions = async (req, res) => {
       throw error;
     }
 
-    const resume = await Resume.findOne({ userId, isDeleted: false });
+    const resume = await Resume.findOne({ userId });
     if (!resume) {
       const error = new Error("You must have a resume to calculate ATS score");
       error.status = 400;
@@ -194,7 +179,7 @@ exports.generateCoverLetterForJob = async (req, res) => {
       throw error;
     }
 
-    const resume = await Resume.findOne({ userId, isDeleted: false });
+    const resume = await Resume.findOne({ userId });
     if (!resume) {
       const error = new Error("You must have a resume to generate a cover letter");
       error.status = 400;
@@ -253,7 +238,7 @@ exports.applyForJob = async (req, res) => {
       throw error;
     }
 
-    const resume = await Resume.findOne({ userId, isDeleted: false });
+    const resume = await Resume.findOne({ userId });
     if (!resume) {
       const error = new Error("You must have a resume to apply for a job");
       error.status = 400;
@@ -311,7 +296,7 @@ exports.applyForJob = async (req, res) => {
         coverLetter,
         atsScore,
       });
-      jobSeeker.appliedJobs.push({ 
+      jobSeeker.appliedJobs.push({
         jobId,
         appliedAt: new Date(),
         coverLetter,

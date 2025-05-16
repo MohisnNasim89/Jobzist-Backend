@@ -22,6 +22,8 @@ const searchRoutes = require("./src/routes/search/searchRoutes");
 const recommendationRoutes = require("./src/routes/recommendation/recommendationRoutes");
 const chatRoutes = require("./src/routes/chat/chatRoutes");
 const resumeRoutes = require("./src/routes/resume/resumeRoutes");
+const companyAdminRoutes = require("./src/routes/companyAdmin/companyAdminRoutes");
+const superAdminRoutes = require("./src/routes/superAdmin/superAdminRoutes");
 
 dotenv.config();
 const app = express();
@@ -49,7 +51,8 @@ app.use("/api/search", searchRoutes);
 app.use("/api/recommendations", recommendationRoutes);
 app.use("/api/chats", chatRoutes);
 app.use("/api/resume", resumeRoutes);
-
+app.use("/api/company-admin", companyAdminRoutes);
+app.use("/api/super-admin", superAdminRoutes);
 // Root Route
 app.get("/", (req, res) => {
   res.send("Jobzist Backend is Running 🚀");

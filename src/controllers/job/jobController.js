@@ -25,8 +25,11 @@ exports.createJob = async (req, res) => {
     let companyId = null;
     let company = null;
 
+    
+
     if (role === "company_admin") {
       const companyAdmin = await checkCompanyAdminExists(userId);
+      console.log(companyAdmin);
       companyId = companyAdmin.companyId;
       company = await checkCompanyExists(companyId);
     } else if (role === "employer") {
@@ -39,6 +42,8 @@ exports.createJob = async (req, res) => {
         company = await checkCompanyExists(companyId);
       }
     }
+
+    console.log(companyId, company);
 
     const jobData = {
       ...req.body,
