@@ -17,23 +17,29 @@ const generateToken = (userId, role) => {
   );
 };
 
+const getRoleModel = (role) => {
+  switch (role) {
+    case "job_seeker": return JobSeeker;
+    case "employer": return Employer;
+    case "company_admin": return CompanyAdmin;
+    case "super_admin": return SuperAdmin;
+    default: return null;
+  }
+};
+
 exports.register = async (req, res) => {
   try {
     const { email, password, role, fullName } = req.body;
     if (!email || !password || !role || !fullName) {
-      throw new Error("All fields are required");
+      return res.status(400).json({ message: "All fields are required" });
     }
 
     const validRoles = ["job_seeker", "employer", "company_admin", "super_admin"];
     if (!validRoles.includes(role)) {
-      throw new Error("Invalid role");
+      return res.status(400).json({ message: "Invalid role" });
     }
 
     const userRecord = await admin.auth().createUser({ email, password });
-    if (!userRecord) {
-      throw new Error("User creation failed");
-    }
-
     const newUser = new User({ authId: userRecord.uid, email, role });
     await newUser.save();
 
@@ -43,56 +49,50 @@ exports.register = async (req, res) => {
     newUser.profileId = userProfile._id;
     await newUser.save();
 
-    let roleSpecificData;
-    switch (role) {
-      case "job_seeker":
-        roleSpecificData = new JobSeeker({ userId: newUser._id });
-        break;
-      case "employer":
-        roleSpecificData = new Employer({ userId: newUser._id });
-        break;
-      case "company_admin":
-        roleSpecificData = new CompanyAdmin({ userId: newUser._id });
-        break;
-      case "super_admin":
-        roleSpecificData = new SuperAdmin({ userId: newUser._id });
-        break;
-      default:
-        throw new Error("Invalid role");
-    }
-    await roleSpecificData.save();
+    const RoleModel = getRoleModel(role);
+    const roleData = new RoleModel({ userId: newUser._id });
+    await roleData.save();
 
     const emailVerificationLink = await admin.auth().generateEmailVerificationLink(email);
 
-    return res.status(200).json({
+    res.status(200).json({
       message: "Verification email sent",
       link: emailVerificationLink,
     });
   } catch (error) {
-    res.status(error.status || 500).json({
+    console.error("Registration Error:", error);
+    res.status(500).json({
       message: error.message || "An error occurred during registration",
     });
   }
 };
 
+// ⚠️ Firebase Admin SDK can't verify passwords! You must do this on client or switch to bcrypt in Node.
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
-      throw new Error("Email and password are required");
+      return res.status(400).json({ message: "Email and password are required" });
     }
 
+    // Get user from Firebase
     const userRecord = await admin.auth().getUserByEmail(email);
     if (!userRecord) {
-      throw new Error("User not found in Firebase");
+      return res.status(404).json({ message: "User not found in Firebase" });
     }
 
+    // ⚠️ Password check MUST be done on client via Firebase Client SDK
+    // Or alternatively, use custom bcrypt-based auth in backend.
+
     const user = await User.findOne({ email, isDeleted: false })
-      .populate({ path: "profileId", match: { isDeleted: false } })
-      .populate({ path: "roleSpecificData", match: { isDeleted: false } });
+      .populate("profileId")
+      .populate({
+        path: "roleSpecificData",
+        model: getRoleModel(userRecord.customClaims?.role || "job_seeker"),
+      });
 
     if (!user) {
-      throw new Error("User not found");
+      return res.status(404).json({ message: "User not found in DB" });
     }
 
     const token = generateToken(user._id.toString(), user.role);
@@ -104,13 +104,14 @@ exports.login = async (req, res) => {
       roleSpecificData: user.roleSpecificData || {},
     });
 
-    return res.status(200).json({
+    res.status(200).json({
       message: "Login successful",
       token,
       profile: profileData,
     });
   } catch (error) {
-    res.status(error.status || 500).json({
+    console.error("Login Error:", error);
+    res.status(500).json({
       message: error.message || "An error occurred during login",
     });
   }
@@ -118,16 +119,13 @@ exports.login = async (req, res) => {
 
 exports.oauthLogin = async (req, res) => {
   try {
-    const { idToken, provider } = req.body;
-    if (!idToken || !provider) {
-      throw new Error("Invalid request");
-    }
+    const { idToken } = req.body;
+    if (!idToken) return res.status(400).json({ message: "ID token required" });
 
     const decodedToken = await admin.auth().verifyIdToken(idToken);
-
     let user = await User.findOne({ authId: decodedToken.uid, isDeleted: false });
-    let isNewUser = false;
 
+    let isNewUser = false;
     if (!user) {
       isNewUser = true;
       user = new User({
@@ -146,15 +144,13 @@ exports.oauthLogin = async (req, res) => {
       user.profileId = userProfile._id;
       await user.save();
 
-      const roleSpecificData = new JobSeeker({
-        userId: user._id,
-      });
-      await roleSpecificData.save();
+      const roleData = new JobSeeker({ userId: user._id });
+      await roleData.save();
     }
 
     user = await User.findOne({ authId: decodedToken.uid, isDeleted: false })
-      .populate({ path: "profileId", match: { isDeleted: false } })
-      .populate({ path: "roleSpecificData", match: { isDeleted: false } });
+      .populate("profileId")
+      .populate({ path: "roleSpecificData", model: JobSeeker });
 
     const token = generateToken(user._id.toString(), user.role);
     const profileData = renderProfileWithFallback(user, "user", {
@@ -165,14 +161,15 @@ exports.oauthLogin = async (req, res) => {
       roleSpecificData: user.roleSpecificData || {},
     });
 
-    return res.status(200).json({
+    res.status(200).json({
       message: isNewUser ? "User registered via OAuth" : "OAuth login successful",
       token,
       profile: profileData,
     });
   } catch (error) {
-    res.status(error.status || 500).json({
-      message: error.message || "An error occurred during OAuth login",
+    console.error("OAuth Login Error:", error);
+    res.status(500).json({
+      message: error.message || "OAuth login failed",
     });
   }
 };
@@ -180,28 +177,34 @@ exports.oauthLogin = async (req, res) => {
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email) throw new Error("Email is required");
+    if (!email) return res.status(400).json({ message: "Email is required" });
 
     const user = await User.findOne({ email, isDeleted: false });
     if (!user) {
-      throw new Error("User not found");
+      return res.status(404).json({ message: "User not found" });
     }
 
     const resetLink = await admin.auth().generatePasswordResetLink(email);
-    return res.status(200).json({ message: "Password reset link sent", resetLink });
+    res.status(200).json({ message: "Password reset link sent", resetLink });
   } catch (error) {
-    res.status(error.status || 500).json({
-      message: error.message || "An error occurred while sending the password reset link",
+    console.error("Forgot Password Error:", error);
+    res.status(500).json({
+      message: error.message || "Error sending password reset link",
     });
   }
 };
 
 exports.logout = async (req, res) => {
   try {
-    return res.status(200).json({ message: "Logout successful" });
+    const { userId } = req.user;
+
+    await admin.auth().revokeRefreshTokens(userId);
+
+    res.status(200).json({ message: "Logout successful" });
   } catch (error) {
-    res.status(error.status || 500).json({
-      message: error.message || "An error occurred during logout",
+    console.error("Logout Error:", error);
+    res.status(500).json({
+      message: error.message || "Logout failed",
     });
   }
 };

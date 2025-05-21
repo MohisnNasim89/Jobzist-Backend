@@ -10,6 +10,7 @@ const userSchema = new mongoose.Schema(
       enum: ["job_seeker", "employer", "company_admin", "super_admin"],
       required: true,
     },
+    password: { type: String, required: true },
     profileId: { type: mongoose.Schema.Types.ObjectId, ref: "UserProfile" },
   },
   { timestamps: true }
