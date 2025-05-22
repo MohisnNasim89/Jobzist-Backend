@@ -12,13 +12,13 @@ const { createPost, getPost, getUserPosts, updatePost, deletePost,
 
 const router = express.Router();
 
-router.post("/", verifyToken, createPostValidationRules, validate, upload.single("media"), createPost );
+router.post("/", verifyToken, createPostValidationRules, validate, upload.array("media", 5), createPost);
 
-router.get("/:postId", verifyToken, postIdValidationRules, validate, getPost );
+router.get("/:postId", verifyToken, postIdValidationRules, validate, getPost);
 
 router.get("/user/:userId", verifyToken, postIdValidationRules, validate, getUserPosts);
 
-router.put("/:postId", verifyToken, postIdValidationRules, createPostValidationRules, validate, upload.single("media"), updatePost);
+router.put("/:postId", verifyToken, postIdValidationRules, createPostValidationRules, validate, upload.array("media", 5), updatePost);
 
 router.delete("/:postId", verifyToken, postIdValidationRules, validate, deletePost);
 

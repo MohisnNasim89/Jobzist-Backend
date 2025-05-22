@@ -1,6 +1,7 @@
 const Post = require("../../models/post/Posts");
 const Notification = require("../../models/notification/Notification");
 const UserProfile = require("../../models/user/UserProfile");
+const logger = require("../../utils/logger");
 const {
   checkPostExists,
   checkPostOwnership,
@@ -26,16 +27,18 @@ exports.createPost = async (req, res) => {
       userId,
       content: content || "",
       visibility: visibility || "public",
-      tags: tags || [],
-      media: { type: "none", url: null },
+      tags: tags ? JSON.parse(tags) : [], // Parse tags if sent as JSON string
+      media: [],
     });
 
-    if (req.file) {
-      const fileType = req.file.mimetype.startsWith("image/") ? "image" : "video";
-      post.media = {
-        type: fileType,
-        url: req.file.path, // Cloudinary URL
-      };
+    if (req.files && req.files.length > 0) {
+      post.media = req.files.map((file) => {
+        const fileType = file.mimetype.startsWith("image/") ? "image" : "video";
+        return {
+          type: fileType,
+          url: file.path, // Cloudinary URL
+        };
+      });
     }
 
     await post.save();
@@ -66,6 +69,7 @@ exports.createPost = async (req, res) => {
       post: populatedPost,
     });
   } catch (error) {
+    logger.error(`Error creating post: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while creating the post",
     });
@@ -85,6 +89,7 @@ exports.getPost = async (req, res) => {
 
     return res.status(200).json({ post });
   } catch (error) {
+    logger.error(`Error retrieving post: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving the post",
     });
@@ -110,6 +115,7 @@ exports.getUserPosts = async (req, res) => {
 
     return res.status(200).json({ posts });
   } catch (error) {
+    logger.error(`Error retrieving user posts: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving user posts",
     });
@@ -138,12 +144,14 @@ exports.updatePost = async (req, res) => {
       }
     });
 
-    if (req.file) {
-      const fileType = req.file.mimetype.startsWith("image/") ? "image" : "video";
-      post.media = {
-        type: fileType,
-        url: req.file.path, // Cloudinary URL
-      };
+    if (req.files && req.files.length > 0) {
+      post.media = req.files.map((file) => {
+        const fileType = file.mimetype.startsWith("image/") ? "image" : "video";
+        return {
+          type: fileType,
+          url: file.path, // Cloudinary URL
+        };
+      });
     }
 
     await post.save();
@@ -157,6 +165,7 @@ exports.updatePost = async (req, res) => {
       post: populatedPost,
     });
   } catch (error) {
+    logger.error(`Error updating post: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while updating the post",
     });
@@ -175,6 +184,7 @@ exports.deletePost = async (req, res) => {
 
     return res.status(200).json({ message: "Post deleted successfully" });
   } catch (error) {
+    logger.error(`Error deleting post: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while deleting the post",
     });
@@ -188,7 +198,6 @@ exports.likePost = async (req, res) => {
 
     const post = await checkPostExists(postId);
 
-    // Check visibility
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
     }
@@ -219,6 +228,7 @@ exports.likePost = async (req, res) => {
       likes: post.likes.length,
     });
   } catch (error) {
+    logger.error(`Error liking/unliking post: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while liking/unliking the post",
     });
@@ -233,7 +243,6 @@ exports.commentOnPost = async (req, res) => {
 
     const post = await checkPostExists(postId);
 
-    // Check visibility
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
     }
@@ -263,6 +272,7 @@ exports.commentOnPost = async (req, res) => {
       comment: post.comments[post.comments.length - 1],
     });
   } catch (error) {
+    logger.error(`Error commenting on post: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while commenting on the post",
     });
@@ -276,7 +286,6 @@ exports.deleteComment = async (req, res) => {
 
     const post = await checkPostExists(postId);
 
-    // Check visibility
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
     }
@@ -304,6 +313,7 @@ exports.deleteComment = async (req, res) => {
       message: "Comment deleted successfully",
     });
   } catch (error) {
+    logger.error(`Error deleting comment: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while deleting the comment",
     });
@@ -317,7 +327,6 @@ exports.sharePost = async (req, res) => {
 
     const post = await checkPostExists(postId);
 
-    // Check visibility
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
     }
@@ -346,6 +355,7 @@ exports.sharePost = async (req, res) => {
       shares: post.shares.length,
     });
   } catch (error) {
+    logger.error(`Error sharing post: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while sharing the post",
     });
@@ -359,7 +369,6 @@ exports.savePost = async (req, res) => {
 
     const post = await checkPostExists(postId);
 
-    // Check visibility
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
     }
@@ -377,6 +386,7 @@ exports.savePost = async (req, res) => {
       saves: post.saves.length,
     });
   } catch (error) {
+    logger.error(`Error saving/unsaving post: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while saving/unsaving the post",
     });
@@ -391,7 +401,6 @@ exports.togglePostVisibility = async (req, res) => {
     const post = await checkPostExists(postId);
     checkPostOwnership(post, userId);
 
-    // Toggle visibility between "private" and "public"
     const newVisibility = post.visibility === "public" ? "private" : "public";
     post.visibility = newVisibility;
     await post.save();
@@ -405,6 +414,7 @@ exports.togglePostVisibility = async (req, res) => {
       post: populatedPost,
     });
   } catch (error) {
+    logger.error(`Error toggling post visibility: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while toggling post visibility",
     });

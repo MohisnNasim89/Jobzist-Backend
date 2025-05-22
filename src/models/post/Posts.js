@@ -15,6 +15,11 @@ const tagSchema = new mongoose.Schema({
   id: { type: mongoose.Schema.Types.ObjectId, required: true, refPath: "tags.type" },
 });
 
+const mediaSchema = new mongoose.Schema({
+  type: { type: String, enum: ["image", "video"], required: true },
+  url: { type: String, required: true },
+});
+
 const postSchema = new mongoose.Schema(
   {
     userId: {
@@ -28,14 +33,7 @@ const postSchema = new mongoose.Schema(
       maxlength: 5000,
       default: "",
     },
-    media: {
-      type: {
-        type: String,
-        enum: ["image", "video", "none"],
-        default: "none",
-      },
-      url: { type: String, default: null },
-    },
+    media: [mediaSchema],
     tags: [tagSchema],
     likes: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     comments: [commentSchema],
