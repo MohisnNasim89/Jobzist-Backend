@@ -3,6 +3,7 @@ const dotenv = require("dotenv");
 const cors = require("cors");
 const morgan = require("morgan");
 const helmet = require("helmet");
+const logger = require("../../utils/logger");
 const connectDB = require("./src/config/database/mongo");
 const upload = require("./src/config/multerConfig");
 const errorMiddleware = require("./src/middlewares/errorMiddleware");

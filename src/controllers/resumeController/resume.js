@@ -2,147 +2,49 @@ const Resume = require("../../models/resume/ResumeModel");
 const User = require("../../models/user/Users");
 const JobSeeker = require("../../models/user/JobSeeker");
 const { checkUserExists, checkRole } = require("../../utils/checks");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-require("dotenv").config();
-
-// Initialize Gemini 2.0 Flash
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const { generateResume: generateAIResume } = require("../../services/aiService");
 
 exports.generateResume = async (req, res) => {
   try {
     const { userId, role } = req.user;
-    let {
-      experiences,
-      projects,
-      skills,
-    } = req.body;
-
     await checkUserExists(userId);
-    checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can generate resumes");
+    checkRole(role, ["job_seeker"]);
 
-    let resume = await Resume.findOne({ userId });
-    if (resume) {
-      throw new Error("You already have a resume. Please edit the existing one.");
-    }
+    const existing = await Resume.findOne({ userId });
+    if (existing) throw new Error("Resume already exists");
 
-    const isBodyEmpty = Object.keys(req.body).length === 0;
+    const jobSeeker = await JobSeeker.findOne({ userId, isDeleted: false });
+    if (!jobSeeker) throw new Error("Job seeker profile not found");
 
-    if (isBodyEmpty) {
-      const user = await User.findById(userId);
-      if (!user) {
-        throw new Error("User not found");
-      }
+    const user = await User.findById(userId);
+    if (!user) throw new Error("User profile not found");
 
-      const jobSeeker = await JobSeeker.findOne({ userId, isDeleted: false });
-      if (!jobSeeker) {
-        throw new Error("Job seeker profile not found. Please create a job seeker profile first.");
-      }
+    const resumeData = {
+      fullName: user.fullName || "Not provided",
+      bio: jobSeeker.bio || "Not provided",
+      location: jobSeeker.jobPreferences?.location || "Not provided",
+      contactInformation: {
+        email: user.email,
+        phone: jobSeeker.contactInformation?.phone || "Not provided"
+      },
+      socialLinks: jobSeeker.socialLinks || [],
+      education: jobSeeker.education || [],
+      experiences: jobSeeker.experience || [],
+      projects: jobSeeker.projects || [],
+      skills: jobSeeker.skills || [],
+    };
 
-      const userProfile = await User.findOne({ userId, isDeleted: false });
-      if (!userProfile) {
-        throw new Error("User profile not found. Please create a user profile first."); 
-      }
+    const generated = await generateAIResume(resumeData);
 
-      fullName = userProfile.fullName || "Not provided";
-      bio = jobSeeker.bio || "Not provided";
-      location = jobSeeker.jobPreferences?.location || "Not provided";
-      contactInformation = {
-        email: user.email || "Not provided",
-        phone: jobSeeker.contactInformation?.phone || "Not provided",
-      };
-      socialLinks = jobSeeker.socialLinks || [];
-      education = jobSeeker.education.map((edu) => ({
-        institution: edu.institution,
-        degree: edu.degree,
-        startDate: edu.startYear ? `${edu.startYear}-01-01` : "Not provided",
-        endDate: edu.endYear ? `${edu.endYear}-12-31` : "Not provided",
-        description: edu.description || "Not provided",
-      }));
-      experiences = jobSeeker.experience.map((exp) => ({
-        company: exp.company,
-        position: exp.title,
-        startDate: exp.startDate ? exp.startDate.toISOString().split("T")[0] : "Not provided",
-        endDate: exp.endDate ? exp.endDate.toISOString().split("T")[0] : "Not provided",
-        description: exp.description || "Not provided",
-      }));
-      projects = jobSeeker.projects.map((proj) => ({
-        title: proj.title,
-        description: proj.description,
-        technologies: proj.technologies || [],
-        startDate: proj.startDate ? proj.startDate.toISOString().split("T")[0] : "Not provided",
-        endDate: proj.endDate ? proj.endDate.toISOString().split("T")[0] : "Not provided",
-        link: proj.link,
-      }));
-      skills = jobSeeker.skills || [];
-    }
-
-    // Prepare the prompt for Gemini 2.0 Flash
-    const prompt = `
-      You are an expert resume generator. Create a structured resume in JSON format based on the following data:
-      - Full Name: ${fullName || "Not provided"}
-      - Bio: ${bio || "Not provided"}
-      - Location: ${location || "Not provided"}
-      - Contact Information: ${JSON.stringify(contactInformation || { email: "Not provided", phone: "Not provided" })}
-      - Social Links: ${JSON.stringify(socialLinks || [])}
-      - Education: ${JSON.stringify(education || [])}
-      - Experiences: ${JSON.stringify(experiences || [])}
-      - Projects: ${JSON.stringify(projects || [])}
-      - Skills: ${JSON.stringify(skills || [])}
-
-      The output should be a JSON object named "resume" with the following structure:
-      {
-        "resume": {
-          "fullName": "string",
-          "bio": "string",
-          "location": "string",
-          "contactInformation": { "email": "string", "phone": "string" },
-          "socialLinks": [{ "platform": "string", "url": "string" }],
-          "education": [{ "institution": "string", "degree": "string", "fieldOfStudy": "string", "startDate": "string", "endDate": "string", "description": "string" }],
-          "experiences": [{ "company": "string", "position": "string", "startDate": "string", "endDate": "string", "description": "string" }],
-          "projects": [{ "title": "string", "description": "string", "technologies": ["string"], "startDate": "string", "endDate": "string", "link": "string" }],
-          "skills": ["string"]
-        }
-      }
-
-      Ensure all dates are in "YYYY-MM-DD" format. Enhance the bio and descriptions to be professional and concise if needed. Return only the JSON content without any additional formatting`
-    ;
-
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    let text = response.text().trim();
-
-    // Remove Markdown code block markers if present
-    if (text.startsWith("```json") && text.endsWith("```")) {
-      text = text.replace(/```json\s*|\s*```/g, "").trim();
-    }
-
-    const generatedResume = JSON.parse(text);
-
-    // Create new resume document
-    resume = new Resume({
+    const resume = new Resume({
       userId,
-      fullName: generatedResume.resume.fullName,
-      bio: generatedResume.resume.bio,
-      location: generatedResume.resume.location,
-      contactInformation: generatedResume.resume.contactInformation,
-      socialLinks: generatedResume.resume.socialLinks,
-      education: generatedResume.resume.education,
-      experiences: generatedResume.resume.experiences,
-      projects: generatedResume.resume.projects,
-      skills: generatedResume.resume.skills,
+      ...generated
     });
-
     await resume.save();
 
-    res.status(201).json({
-      message: "Resume generated successfully",
-      resume: generatedResume.resume,
-    });
-  } catch (error) {
-    res.status(error.status || 500).json({
-      message: error.message || "An error occurred while generating the resume",
-    });
+    res.status(201).json({ message: "Resume generated", resume: generated });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
 

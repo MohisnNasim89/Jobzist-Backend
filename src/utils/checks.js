@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const User = require("../models/user/Users");
 const UserProfile = require("../models/user/UserProfile");
 const JobSeeker = require("../models/user/JobSeeker");
@@ -139,25 +140,25 @@ const renderProfileWithFallback = (entity, type, fallback, isCreator = false) =>
       break;
     case "job":
       profile._id = entity._id || fallback._id;
-      profile.title = entity.title || fallback.title;
+      profile.title = entity.title || fallback.title || "Untitled Job";
       profile.companyId = entity.companyId || fallback.companyId;
       profile.company = entity.companyId
         ? {
             _id: entity.companyId._id || (fallback.company ? fallback.company._id : null),
-            name: entity.companyId.name || (fallback.company ? fallback.company.name : null),
+            name: entity.companyId.name || (fallback.company ? fallback.company.name : "Unnamed Company"),
             logo: entity.companyId.logo || (fallback.company ? fallback.company.logo : null),
           }
         : fallback.company || null;
       profile.postedBy = entity.postedBy?.profileId?.fullName || fallback.postedBy || "Unknown";
-      profile.description = entity.description || fallback.description;
-      profile.location = entity.location || fallback.location;
-      profile.jobType = entity.jobType || fallback.jobType;
-      profile.salary = entity.salary || fallback.salary;
-      profile.requirements = entity.requirements || fallback.requirements;
-      profile.skills = entity.skills || fallback.skills;
-      profile.experienceLevel = entity.experienceLevel || fallback.experienceLevel;
-      profile.applicationDeadline = entity.applicationDeadline || fallback.applicationDeadline;
-      profile.status = entity.status || fallback.status;
+      profile.description = entity.description || fallback.description || "No description";
+      profile.location = entity.location || fallback.location || { country: "Unknown", city: "Unknown" };
+      profile.jobType = entity.jobType || fallback.jobType || "Unknown";
+      profile.salary = entity.salary || fallback.salary || { min: 0, max: 0, currency: "Unknown" };
+      profile.requirements = entity.requirements || fallback.requirements || [];
+      profile.skills = entity.skills || fallback.skills || [];
+      profile.experienceLevel = entity.experienceLevel || fallback.experienceLevel || "Unknown";
+      profile.applicationDeadline = entity.applicationDeadline || fallback.applicationDeadline || null;
+      profile.status = entity.status || fallback.status || "Unknown";
       profile.createdAt = entity.createdAt || fallback.createdAt;
 
       if (isCreator) {
@@ -181,6 +182,26 @@ const renderProfileWithFallback = (entity, type, fallback, isCreator = false) =>
       profile.socialLinks = entity.socialLinks || fallback.socialLinks || [];
       profile.logo = entity.logo || fallback.logo || "Not provided";
       profile.jobListings = entity.jobListings || fallback.jobListings || [];
+      break;
+    case "job_seeker":
+      profile.userId = entity.userId || fallback.userId || null;
+      profile.resume = entity.resume || fallback.resume || "Not provided";
+      profile.skills = entity.skills || fallback.skills || [];
+      profile.education = entity.education || fallback.education || [];
+      profile.experience = entity.experience || fallback.experience || [];
+      profile.jobPreferences = entity.jobPreferences || fallback.jobPreferences || {};
+      profile.appliedJobs = entity.appliedJobs || fallback.appliedJobs || [];
+      profile.savedJobs = entity.savedJobs || fallback.savedJobs || [];
+      profile.status = entity.status || fallback.status || "Unknown";
+      break;
+    case "employer":
+      profile.userId = entity.userId || fallback.userId || null;
+      profile.roleType = entity.roleType || fallback.roleType || "Unknown";
+      profile.companyId = entity.companyId || fallback.companyId || null;
+      profile.companyName = entity.companyName || fallback.companyName || "Not associated";
+      profile.jobListings = entity.jobListings || fallback.jobListings || [];
+      profile.hiredCandidates = entity.hiredCandidates || fallback.hiredCandidates || [];
+      profile.status = entity.status || fallback.status || "Unknown";
       break;
     default:
       return fallback;

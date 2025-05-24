@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Chat = require("../../models/chat/Chat");
 const User = require("../../models/user/Users");
 const UserProfile = require("../../models/user/UserProfile");
+const logger = require("../../utils/logger");
 const { checkUserExists } = require("../../utils/checks");
 const { emitMessage, emitNotification } = require("../../socket/socket");
 const { generateKey, encrypt, decrypt, encryptKey, decryptKey } = require("../../utils/encryption");
@@ -52,6 +53,7 @@ exports.startChat = async (req, res) => {
 
     res.status(200).json({ chat: { ...chat.toObject(), messages: decryptedMessages } });
   } catch (error) {
+    logger.error(`Error starting chat: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while starting the chat",
     });
@@ -123,6 +125,7 @@ exports.sendMessage = async (req, res) => {
       newMessage: { ...newMessage, message: message.trim() },
     });
   } catch (error) {
+    logger.error(`Error sending message: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while sending the message",
     });
@@ -151,6 +154,7 @@ exports.getChatHistory = async (req, res) => {
 
     res.status(200).json({ messages: decryptedMessages });
   } catch (error) {
+    logger.error(`Error retrieving chat history: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving chat history",
     });
@@ -204,6 +208,7 @@ exports.markMessagesAsRead = async (req, res) => {
 
     res.status(200).json({ message: "Messages marked as read" });
   } catch (error) {
+    logger.error(`Error marking messages as read: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while marking messages as read",
     });
@@ -235,6 +240,7 @@ exports.getUserChats = async (req, res) => {
 
     res.status(200).json({ chats: enrichedChats });
   } catch (error) {
+    logger.error(`Error retrieving user chats: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving user chats",
     });
@@ -267,6 +273,7 @@ exports.deleteChat = async (req, res) => {
 
     res.status(200).json({ message: "Chat deleted successfully" });
   } catch (error) {
+    logger.error(`Error deleting chat: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while deleting the chat",
     });
@@ -312,6 +319,7 @@ exports.deleteMessage = async (req, res) => {
 
     res.status(200).json({ message: "Message deleted successfully" });
   } catch (error) {
+    logger.error(`Error deleting message: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while deleting the message",
     });
@@ -367,6 +375,7 @@ exports.editMessage = async (req, res) => {
 
     res.status(200).json({ message: "Message edited successfully", newMessage: newMessage.trim() });
   } catch (error) {
+    logger.error(`Error editing message: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while editing the message",
     });

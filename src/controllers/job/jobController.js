@@ -43,8 +43,6 @@ exports.createJob = async (req, res) => {
       }
     }
 
-    console.log(companyId, company);
-
     const jobData = {
       ...req.body,
       companyId,

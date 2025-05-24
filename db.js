@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const uri = 'mongodb+srv://mohsinnasim82:QWERTYMOHSINN@jobzist.7gcdg.mongodb.net/';
+const uri = 'process.env.MONGO_URI';
 
 async function clearDatabase() {
   await mongoose.connect(uri);

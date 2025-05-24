@@ -1,5 +1,6 @@
 const admin = require("../config/database/firebase");
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
 const User = require("../models/user/Users");
 const UserProfile = require("../models/user/UserProfile");
 const JobSeeker = require("../models/user/JobSeeker");
@@ -7,6 +8,7 @@ const Employer = require("../models/user/Employer");
 const CompanyAdmin = require("../models/company/CompanyAdmin");
 const SuperAdmin = require("../models/user/SuperAdmin");
 const { renderProfileWithFallback } = require("../utils/checks");
+const logger = require("../utils/logger");
 require("dotenv").config();
 
 const generateToken = (userId, role) => {
@@ -39,8 +41,15 @@ exports.register = async (req, res) => {
       return res.status(400).json({ message: "Invalid role" });
     }
 
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: "User already exists" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
     const userRecord = await admin.auth().createUser({ email, password });
-    const newUser = new User({ authId: userRecord.uid, email, role });
+    const newUser = new User({ authId: userRecord.uid, email, role, password: hashedPassword });
     await newUser.save();
 
     const userProfile = new UserProfile({ userId: newUser._id, fullName });
@@ -60,14 +69,13 @@ exports.register = async (req, res) => {
       link: emailVerificationLink,
     });
   } catch (error) {
-    console.error("Registration Error:", error);
+    logger.error(`Registration Error: ${error.message}`);
     res.status(500).json({
       message: error.message || "An error occurred during registration",
     });
   }
 };
 
-// ⚠️ Firebase Admin SDK can't verify passwords! You must do this on client or switch to bcrypt in Node.
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -75,14 +83,14 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: "Email and password are required" });
     }
 
-    // Get user from Firebase
     const userRecord = await admin.auth().getUserByEmail(email);
     if (!userRecord) {
       return res.status(404).json({ message: "User not found in Firebase" });
     }
 
-    // ⚠️ Password check MUST be done on client via Firebase Client SDK
-    // Or alternatively, use custom bcrypt-based auth in backend.
+    if (!userRecord.emailVerified) {
+      return res.status(403).json({ message: "Email not verified. Please verify your email to log in." });
+    }
 
     const user = await User.findOne({ email, isDeleted: false })
       .populate("profileId")
@@ -93,6 +101,11 @@ exports.login = async (req, res) => {
 
     if (!user) {
       return res.status(404).json({ message: "User not found in DB" });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: "Invalid password" });
     }
 
     const token = generateToken(user._id.toString(), user.role);
@@ -110,7 +123,7 @@ exports.login = async (req, res) => {
       profile: profileData,
     });
   } catch (error) {
-    console.error("Login Error:", error);
+    logger.error(`Login Error: ${error.message}`);
     res.status(500).json({
       message: error.message || "An error occurred during login",
     });
@@ -167,7 +180,7 @@ exports.oauthLogin = async (req, res) => {
       profile: profileData,
     });
   } catch (error) {
-    console.error("OAuth Login Error:", error);
+    logger.error(`OAuth Login Error: ${error.message}`);
     res.status(500).json({
       message: error.message || "OAuth login failed",
     });
@@ -187,7 +200,7 @@ exports.forgotPassword = async (req, res) => {
     const resetLink = await admin.auth().generatePasswordResetLink(email);
     res.status(200).json({ message: "Password reset link sent", resetLink });
   } catch (error) {
-    console.error("Forgot Password Error:", error);
+    logger.error(`Forgot Password Error: ${error.message}`);
     res.status(500).json({
       message: error.message || "Error sending password reset link",
     });
@@ -202,7 +215,7 @@ exports.logout = async (req, res) => {
 
     res.status(200).json({ message: "Logout successful" });
   } catch (error) {
-    console.error("Logout Error:", error);
+    logger.error(`Logout Error: ${error.message}`);
     res.status(500).json({
       message: error.message || "Logout failed",
     });
