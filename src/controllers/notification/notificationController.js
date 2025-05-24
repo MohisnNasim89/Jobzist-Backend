@@ -1,4 +1,5 @@
 const Notification = require("../../models/notification/Notification");
+const logger = require("../../utils/logger");
 const { checkUserIdMatch } = require("../../utils/checks");
 
 exports.getNotifications = async (req, res) => {
@@ -9,14 +10,17 @@ exports.getNotifications = async (req, res) => {
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only view your own notifications");
 
     const notifications = await Notification.find({ userId, isDeleted: false })
+      .select("_id userId type message createdAt isRead")
       .sort({ createdAt: -1 })
-      .limit(50);
+      .limit(50)
+      .lean();
 
     res.status(200).json({
       message: "Notifications retrieved successfully",
       notifications,
     });
   } catch (error) {
+    logger.error(`Error retrieving notifications: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving notifications",
     });
@@ -28,16 +32,18 @@ exports.markNotificationAsRead = async (req, res) => {
     const { userId } = req.user;
     const { notificationId } = req.params;
 
-    const notification = await Notification.findOne({ _id: notificationId, userId, isDeleted: false });
+    const notification = await Notification.findOne({ _id: notificationId, userId, isDeleted: false })
+      .select("_id userId isRead isDeleted")
+      .lean();
     if (!notification) {
       throw new Error("Notification not found");
     }
 
-    notification.isRead = true;
-    await notification.save();
+    await Notification.findByIdAndUpdate(notificationId, { isRead: true });
 
     res.status(200).json({ message: "Notification marked as read" });
   } catch (error) {
+    logger.error(`Error marking notification as read: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while marking the notification as read",
     });

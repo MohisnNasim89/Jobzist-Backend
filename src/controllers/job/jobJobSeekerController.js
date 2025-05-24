@@ -3,6 +3,7 @@ const Job = require("../../models/job/Job");
 const JobSeeker = require("../../models/user/JobSeeker");
 const { checkRole, checkJobExists, checkJobSeekerExists } = require("../../utils/checks");
 const { getATSScore, generateCoverLetter } = require("../../services/aiService");
+const logger = require("../../utils/logger");
 
 exports.getATSScoreAndSuggestions = async (req, res) => {
   try {
@@ -10,9 +11,9 @@ exports.getATSScoreAndSuggestions = async (req, res) => {
     const { jobId } = req.params;
 
     checkRole(role, ["job_seeker"]);
-    const job = await checkJobExists(jobId);
-    const resume = await Resume.findOne({ userId });
-    const jobSeeker = await checkJobSeekerExists(userId);
+    const job = await checkJobExists(jobId).lean();
+    const resume = await Resume.findOne({ userId }).lean();
+    const jobSeeker = await checkJobSeekerExists(userId).select("pendingApplications");
 
     if (!resume) throw new Error("Resume not found");
 
@@ -27,8 +28,11 @@ exports.getATSScoreAndSuggestions = async (req, res) => {
 
     await jobSeeker.save();
     res.status(200).json({ atsScore, improvementSuggestions });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+  } catch (error) {
+    logger.error(`Error in getATSScoreAndSuggestions: ${error.message}`);
+    res.status(error.status || 500).json({ 
+      message: error.message
+    });
   }
 };
 
@@ -38,9 +42,9 @@ exports.generateCoverLetterForJob = async (req, res) => {
     const { jobId } = req.params;
 
     checkRole(role, ["job_seeker"]);
-    const job = await checkJobExists(jobId);
-    const resume = await Resume.findOne({ userId });
-    const jobSeeker = await checkJobSeekerExists(userId);
+    const job = await checkJobExists(jobId).lean();
+    const resume = await Resume.findOne({ userId }).select("fullName contactInformation").lean();
+    const jobSeeker = await checkJobSeekerExists(userId).select("pendingApplications");
 
     if (!resume) throw new Error("Resume not found");
 
@@ -57,8 +61,11 @@ exports.generateCoverLetterForJob = async (req, res) => {
 
     await jobSeeker.save();
     res.status(200).json({ coverLetter });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+  } catch (error) {
+    logger.error(`Error in generateCoverLetterForJob: ${error.message}`);
+    res.status(error.status || 500).json({ 
+      message: error.message
+    });
   }
 };
 
@@ -69,14 +76,14 @@ exports.applyForJob = async (req, res) => {
 
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can apply for jobs");
 
-    const job = await checkJobExists(jobId);
+    const job = await checkJobExists(jobId).select("status applicationDeadline applicants").lean();
     if (!job) {
       const error = new Error("Job not found");
       error.status = 404;
       throw error;
     }
 
-    const jobSeeker = await checkJobSeekerExists(userId);
+    const jobSeeker = await checkJobSeekerExists(userId).select("pendingApplications appliedJobs");
     if (!jobSeeker) {
       const error = new Error("Job seeker profile not found");
       error.status = 404;
@@ -90,7 +97,6 @@ exports.applyForJob = async (req, res) => {
       throw error;
     }
 
-    // Check for a pending application with a cover letter
     const pendingApp = jobSeeker.pendingApplications.find(
       (app) => app.jobId.toString() === jobId.toString()
     );
@@ -124,13 +130,11 @@ exports.applyForJob = async (req, res) => {
     if (existingApplicationIndex !== -1 && existingJobSeekerApplicationIndex !== -1) {
       job.applicants.splice(existingApplicationIndex, 1);
       jobSeeker.appliedJobs.splice(existingJobSeekerApplicationIndex, 1);
-      // Remove from pendingApplications
       jobSeeker.pendingApplications = jobSeeker.pendingApplications.filter(
         (app) => app.jobId.toString() !== jobId.toString()
       );
       message = "Application canceled successfully";
     } else if (existingApplicationIndex === -1 && existingJobSeekerApplicationIndex === -1) {
-      // Use the stored cover letter and ATS score
       const coverLetter = pendingApp.coverLetter;
       const atsScore = pendingApp.atsScore;
 
@@ -148,7 +152,6 @@ exports.applyForJob = async (req, res) => {
         atsScore,
       });
 
-      // Remove from pendingApplications after applying
       jobSeeker.pendingApplications = jobSeeker.pendingApplications.filter(
         (app) => app.jobId.toString() !== jobId.toString()
       );
@@ -165,6 +168,7 @@ exports.applyForJob = async (req, res) => {
 
     res.status(200).json({ message });
   } catch (error) {
+    logger.error(`Error in applyForJob: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while applying for or canceling the job application",
     });
@@ -179,14 +183,14 @@ exports.saveJob = async (req, res) => {
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can save jobs");
 
     const jobQuery = checkJobExists(jobId);
-    const job = await jobQuery.exec();
+    const job = await jobQuery.select("savedBy").lean();
     if (!job) {
       const error = new Error("Job not found");
       error.status = 404;
       throw error;
     }
 
-    const jobSeeker = await checkJobSeekerExists(userId);
+    const jobSeeker = await checkJobSeekerExists(userId).select("savedJobs");
     if (!jobSeeker) {
       const error = new Error("Job seeker profile not found");
       error.status = 404;
@@ -220,6 +224,7 @@ exports.saveJob = async (req, res) => {
 
     res.status(200).json({ message });
   } catch (error) {
+    logger.error(`Error in saveJob: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while saving or unsaving the job",
     });
@@ -236,14 +241,17 @@ exports.getSavedJobs = async (req, res) => {
       throw new Error("Unauthorized: You can only view your own saved jobs");
     }
 
-    const jobSeeker = await JobSeeker.findOne({ userId, isDeleted: false }).populate({
-      path: "savedJobs.jobId",
-      match: { isDeleted: false },
-      populate: [
-        { path: "companyId", select: "name logo", match: { isDeleted: false } },
-        { path: "postedBy", populate: { path: "profileId", select: "fullName", match: { isDeleted: false } } },
-      ],
-    });
+    const jobSeeker = await JobSeeker.findOne({ userId, isDeleted: false })
+      .select("savedJobs userId isDeleted")
+      .populate({
+        path: "savedJobs.jobId",
+        match: { isDeleted: false },
+        populate: [
+          { path: "companyId", select: "name logo", match: { isDeleted: false } },
+          { path: "postedBy", populate: { path: "profileId", select: "fullName", match: { isDeleted: false } } },
+        ],
+      })
+      .lean();
 
     if (!jobSeeker) {
       throw new Error("Job seeker profile not found");
@@ -277,6 +285,7 @@ exports.getSavedJobs = async (req, res) => {
       savedJobs,
     });
   } catch (error) {
+    logger.error(`Error in getSavedJobs: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving saved jobs",
     });
@@ -293,14 +302,17 @@ exports.getAppliedJobs = async (req, res) => {
       throw new Error("Unauthorized: You can only view your own applied jobs");
     }
 
-    const jobSeeker = await JobSeeker.findOne({ userId, isDeleted: false }).populate({
-      path: "appliedJobs.jobId",
-      match: { isDeleted: false },
-      populate: [
-        { path: "companyId", select: "name logo", match: { isDeleted: false } },
-        { path: "postedBy", populate: { path: "profileId", select: "fullName", match: { isDeleted: false } } },
-      ],
-    });
+    const jobSeeker = await JobSeeker.findOne({ userId, isDeleted: false })
+      .select("appliedJobs userId isDeleted")
+      .populate({
+        path: "appliedJobs.jobId",
+        match: { isDeleted: false },
+        populate: [
+          { path: "companyId", select: "name logo", match: { isDeleted: false } },
+          { path: "postedBy", populate: { path: "profileId", select: "fullName", match: { isDeleted: false } } },
+        ],
+      })
+      .lean();
 
     if (!jobSeeker) {
       throw new Error("Job seeker profile not found");
@@ -336,6 +348,7 @@ exports.getAppliedJobs = async (req, res) => {
       appliedJobs,
     });
   } catch (error) {
+    logger.error(`Error in getAppliedJobs: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving applied jobs",
     });

@@ -1,5 +1,6 @@
 const Company = require("../../models/company/Company");
 const Job = require("../../models/job/Job");
+const logger = require("../../utils/logger");
 const {
   checkRole,
   checkCompanyExists,
@@ -13,7 +14,7 @@ exports.createCompany = async (req, res) => {
     const { userId, role } = req.user;
 
     checkRole(role, ["company_admin"], "Only company admins can create companies");
-    const companyAdmin = await checkCompanyAdminExists(userId);
+    const companyAdmin = await checkCompanyAdminExists(userId).select("_id companyId");
 
     if (companyAdmin.companyId) {
       throw new Error("Unauthorized: CompanyAdmin already associated with a company");
@@ -59,6 +60,7 @@ exports.createCompany = async (req, res) => {
       company: { ...company.toObject(), profile: profileData },
     });
   } catch (error) {
+    logger.error(`Error creating company: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while creating the company",
     });
@@ -68,7 +70,9 @@ exports.createCompany = async (req, res) => {
 exports.getCompanyProfile = async (req, res) => {
   try {
     const { companyId } = req.params;
-    const company = await checkCompanyExists(companyId);
+    const company = await checkCompanyExists(companyId)
+      .select("name industry location website description companySize foundedYear socialLinks logo jobListings")
+      .lean();
 
     const profileData = renderProfileWithFallback(company, "company", {
       name: company.name || "Unnamed Company",
@@ -89,6 +93,7 @@ exports.getCompanyProfile = async (req, res) => {
 
     return res.status(200).json({ profile: profileData });
   } catch (error) {
+    logger.error(`Error retrieving company profile: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving the company profile",
     });
@@ -101,10 +106,10 @@ exports.updateCompanyProfile = async (req, res) => {
     const updates = req.body;
     const { userId, role } = req.user;
 
-    const company = await checkCompanyExists(companyId);
+    const company = await checkCompanyExists(companyId).select("_id");
     checkRole(role, ["company_admin"], "Unauthorized: Only company admins can update company profiles");
 
-    const companyAdmin = await checkCompanyAdminExists(userId);
+    const companyAdmin = await checkCompanyAdminExists(userId).select("companyId");
     if (companyAdmin.companyId.toString() !== companyId.toString()) {
       throw new Error("Unauthorized: You are not an admin of this company");
     }
@@ -151,6 +156,7 @@ exports.updateCompanyProfile = async (req, res) => {
       profile: profileData,
     });
   } catch (error) {
+    logger.error(`Error updating company profile: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while updating the company profile",
     });
@@ -162,23 +168,24 @@ exports.deleteCompany = async (req, res) => {
     const { companyId } = req.params;
     const { userId, role } = req.user;
 
-    const company = await checkCompanyExists(companyId);
+    const company = await checkCompanyExists(companyId).select("_id");
     checkRole(role, ["company_admin"], "Unauthorized: Only company admins can delete companies");
 
-    const companyAdmin = await checkCompanyAdminExists(userId);
+    const companyAdmin = await checkCompanyAdminExists(userId).select("companyId");
     if (companyAdmin.companyId.toString() !== companyId.toString()) {
       throw new Error("Unauthorized: You are not an admin of this company");
     }
 
     await Job.updateMany({ companyId: companyId }, { $set: { isDeleted: true, deletedAt: new Date() } });
 
-    await company.softDelete();
+    await Company.findByIdAndUpdate(companyId, { isDeleted: true }); // Assuming softDelete sets isDeleted
 
     companyAdmin.companyId = null;
     await companyAdmin.save();
 
     return res.status(200).json({ message: "Company soft deleted successfully" });
   } catch (error) {
+    logger.error(`Error deleting company: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while deleting the company",
     });

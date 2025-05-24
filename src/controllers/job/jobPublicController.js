@@ -1,4 +1,5 @@
 const Job = require("../../models/job/Job");
+const logger = require("../../utils/logger");
 const { checkJobExists, checkCompanyExists, renderProfileWithFallback } = require("../../utils/checks");
 
 exports.getJob = async (req, res) => {
@@ -8,8 +9,10 @@ exports.getJob = async (req, res) => {
     const jobQuery = checkJobExists(jobId);
 
     const job = await jobQuery
+      .select("_id title companyId postedBy description location jobType salary requirements skills experienceLevel applicationDeadline status createdAt")
       .populate({ path: "companyId", select: "name logo", match: { isDeleted: false } })
       .populate({ path: "postedBy", populate: { path: "profileId", select: "fullName", match: { isDeleted: false } } })
+      .lean()
       .exec();
 
     if (!job) {
@@ -49,6 +52,7 @@ exports.getJob = async (req, res) => {
       job: jobProfile,
     });
   } catch (error) {
+    logger.error(`Error retrieving job: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving the job",
     });
@@ -71,20 +75,20 @@ exports.getJobs = async (req, res) => {
     }
 
     const jobs = await Job.find(query)
+      .select("_id title companyId postedBy location jobType salary experienceLevel applicationDeadline status createdAt")
       .populate({ path: "companyId", select: "name logo", match: { isDeleted: false } })
       .populate({ path: "postedBy", populate: { path: "profileId", select: "fullName", match: { isDeleted: false } } })
       .skip((page - 1) * limit)
-      .limit(parseInt(limit));
+      .limit(parseInt(limit))
+      .lean();
 
     const total = await Job.countDocuments(query);
 
-    // Determine if the requesting user is an employer or company_admin
     const userId = req.user?._id?.toString();
     const userRole = req.user?.role;
     const isEmployerOrAdmin = userId && ["employer", "company_admin"].includes(userRole);
 
     const jobProfiles = jobs.map((job) => {
-      // Check if the user is the creator of this specific job
       const jobCreatorId = job.postedBy._id.toString();
       const isCreator = isEmployerOrAdmin && userId === jobCreatorId;
 
@@ -111,6 +115,7 @@ exports.getJobs = async (req, res) => {
       pages: Math.ceil(total / limit),
     });
   } catch (error) {
+    logger.error(`Error retrieving jobs: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving jobs",
     });
@@ -122,14 +127,16 @@ exports.getCompanyJobs = async (req, res) => {
     const { companyId } = req.params;
     const { page = 1, limit = 10 } = req.query;
 
-    await checkCompanyExists(companyId);
+    await checkCompanyExists(companyId).lean();
 
     const query = { companyId, status: "Open", isDeleted: false };
     const jobs = await Job.find(query)
+      .select("_id title companyId postedBy location jobType salary experienceLevel applicationDeadline status createdAt")
       .populate({ path: "companyId", select: "name logo", match: { isDeleted: false } })
       .populate({ path: "postedBy", populate: { path: "profileId", select: "fullName", match: { isDeleted: false } } })
       .skip((page - 1) * limit)
-      .limit(parseInt(limit));
+      .limit(parseInt(limit))
+      .lean();
 
     const total = await Job.countDocuments(query);
 
@@ -164,6 +171,7 @@ exports.getCompanyJobs = async (req, res) => {
       pages: Math.ceil(total / limit),
     });
   } catch (error) {
+    logger.error(`Error retrieving company jobs: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving company jobs",
     });

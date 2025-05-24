@@ -1,22 +1,27 @@
 const Resume = require("../../models/resume/ResumeModel");
 const User = require("../../models/user/Users");
 const JobSeeker = require("../../models/user/JobSeeker");
+const logger = require("../../utils/logger");
 const { checkUserExists, checkRole } = require("../../utils/checks");
 const { generateResume: generateAIResume } = require("../../services/aiService");
 
 exports.generateResume = async (req, res) => {
   try {
     const { userId, role } = req.user;
-    await checkUserExists(userId);
+    await checkUserExists(userId).lean();
     checkRole(role, ["job_seeker"]);
 
-    const existing = await Resume.findOne({ userId });
+    const existing = await Resume.findOne({ userId }).lean();
     if (existing) throw new Error("Resume already exists");
 
-    const jobSeeker = await JobSeeker.findOne({ userId, isDeleted: false });
+    const jobSeeker = await JobSeeker.findOne({ userId, isDeleted: false })
+      .select("bio jobPreferences contactInformation socialLinks education experience projects skills")
+      .lean();
     if (!jobSeeker) throw new Error("Job seeker profile not found");
 
-    const user = await User.findById(userId);
+    const user = await User.findById(userId)
+      .select("fullName email")
+      .lean();
     if (!user) throw new Error("User profile not found");
 
     const resumeData = {
@@ -43,22 +48,25 @@ exports.generateResume = async (req, res) => {
     await resume.save();
 
     res.status(201).json({ message: "Resume generated", resume: generated });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+  } catch (error) {
+    logger.error(`Error generating resume: ${error.message}`);
+    res.status(error.status || 500).json({
+      message: error.message
+    });
   }
 };
 
-// Rest of the file remains unchanged
 exports.uploadResume = async (req, res) => {
   try {
     const { userId, role } = req.user;
 
     // Authorization checks
-    await checkUserExists(userId);
+    await checkUserExists(userId).select("_id").lean();
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can upload resumes");
 
-    // Check if user already has a resume
-    let resume = await Resume.findOne({ userId, isDeleted: false });
+    let resume = await Resume.findOne({ userId, isDeleted: false })
+      .select("_id")
+      .lean();
     if (resume) {
       throw new Error("You already have a resume. Please edit the existing one.");
     }
@@ -67,12 +75,11 @@ exports.uploadResume = async (req, res) => {
       throw new Error("No file uploaded");
     }
 
-    // Create new resume with uploaded file
     resume = new Resume({
       userId,
-      fullName: "", // Placeholder; can be updated later
-      contactInformation: { email: (await User.findById(userId)).email },
-      uploadedResume: req.file.path, // Cloudinary URL
+      fullName: "", 
+      contactInformation: { email: (await User.findById(userId).select("email").lean()).email },
+      uploadedResume: req.file.path, 
     });
 
     await resume.save();
@@ -96,17 +103,15 @@ exports.editResume = async (req, res) => {
     const { userId, role } = req.user;
     const updates = req.body;
 
-    // Authorization checks
-    await checkUserExists(userId);
+    await checkUserExists(userId).select("_id").lean();
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can edit resumes");
 
-    // Check if user has a resume
-    let resume = await Resume.findOne({ userId, isDeleted: false });
+    let resume = await Resume.findOne({ userId, isDeleted: false })
+      .select("_id");
     if (!resume) {
       throw new Error("No resume found. Please generate or upload a resume first.");
     }
 
-    // Define allowed updates
     const allowedUpdates = [
       "fullName",
       "bio",
@@ -119,37 +124,38 @@ exports.editResume = async (req, res) => {
       "skills",
     ];
 
-    // Apply updates
+    const resumeUpdates = {};
     Object.keys(updates).forEach((key) => {
       if (allowedUpdates.includes(key)) {
-        resume[key] = updates[key];
+        resumeUpdates[key] = updates[key];
       }
     });
 
-    // Update uploaded resume if a new file is provided
     if (req.file) {
-      resume.uploadedResume = req.file.path; // Cloudinary URL
+      resumeUpdates.uploadedResume = req.file.path;
     }
 
-    await resume.save();
+    await Resume.findByIdAndUpdate(resume._id, resumeUpdates);
 
+    const updatedResume = await Resume.findById(resume._id);
     res.status(200).json({
       message: "Resume updated successfully",
       resume: {
-        userId: resume.userId,
-        fullName: resume.fullName,
-        bio: resume.bio,
-        location: resume.location,
-        contactInformation: resume.contactInformation,
-        socialLinks: resume.socialLinks,
-        education: resume.education,
-        experiences: resume.experiences,
-        projects: resume.projects,
-        skills: resume.skills,
-        uploadedResume: resume.uploadedResume,
+        userId: updatedResume.userId,
+        fullName: updatedResume.fullName,
+        bio: updatedResume.bio,
+        location: updatedResume.location,
+        contactInformation: updatedResume.contactInformation,
+        socialLinks: updatedResume.socialLinks,
+        education: updatedResume.education,
+        experiences: updatedResume.experiences,
+        projects: updatedResume.projects,
+        skills: updatedResume.skills,
+        uploadedResume: updatedResume.uploadedResume,
       },
     });
   } catch (error) {
+    logger.error(`Error editing resume: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while editing the resume",
     });
@@ -160,10 +166,12 @@ exports.getResume = async (req, res) => {
   try {
     const { userId, role } = req.user;
 
-    await checkUserExists(userId);
+    await checkUserExists(userId).select("_id").lean();
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can view their resume");
 
-    const resume = await Resume.findOne({ userId });
+    const resume = await Resume.findOne({ userId })
+      .select("userId fullName bio location contactInformation socialLinks education experiences projects skills uploadedResume")
+      .lean();
     if (!resume) {
       throw new Error("No resume found");
     }
@@ -185,6 +193,7 @@ exports.getResume = async (req, res) => {
       },
     });
   } catch (error) {
+    logger.error(`Error retrieving resume: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving the resume",
     });
@@ -195,22 +204,23 @@ exports.deleteResume = async (req, res) => {
   try {
     const { userId, role } = req.user;
 
-    // Authorization checks
-    await checkUserExists(userId);
+    await checkUserExists(userId).select("_id").lean();
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can delete their resume");
 
-    console.log("User ID:", userId);
-    const resume = await Resume.findOne({ userId });
+    const resume = await Resume.findOne({ userId })
+      .select("_id")
+      .lean();
     if (!resume) {
       throw new Error("No resume found to delete");
     }
 
-    await resume.softDelete();
+    await Resume.findByIdAndUpdate(resume._id, { isDeleted: true }); // Assuming softDelete sets isDeleted
 
     res.status(200).json({
       message: "Resume deleted successfully",
     });
   } catch (error) {
+    logger.error(`Error deleting resume: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while deleting the resume",
     });

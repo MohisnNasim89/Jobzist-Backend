@@ -20,8 +20,8 @@ exports.startChat = async (req, res) => {
     const user = await checkUserExists(userId);
     const targetUser = await checkUserExists(targetUserId);
 
-    const userProfile = await UserProfile.findOne({ userId });
-    const targetProfile = await UserProfile.findOne({ userId: targetUserId });
+    const userProfile = await UserProfile.findOne({ userId }).select("fullName").lean();
+    const targetProfile = await UserProfile.findOne({ userId: targetUserId }).select("fullName").lean();
 
     if (!userProfile || !targetProfile) {
       throw new Error("User profile not found");
@@ -29,7 +29,7 @@ exports.startChat = async (req, res) => {
 
     let chat = await Chat.findOne({
       "participants.userId": { $all: [userId, targetUserId] },
-    });
+    }).select("participants messages encryptionKey").lean();
 
     if (!chat) {
       const rawEncryptionKey = generateKey();
@@ -47,11 +47,11 @@ exports.startChat = async (req, res) => {
 
     const decryptedEncryptionKey = decryptKey(chat.encryptionKey);
     const decryptedMessages = chat.messages.map((msg) => ({
-      ...msg.toObject(),
+      ...msg,
       message: decrypt(msg.encryptedMessage, decryptedEncryptionKey),
     }));
 
-    res.status(200).json({ chat: { ...chat.toObject(), messages: decryptedMessages } });
+    res.status(200).json({ chat: { ...chat, messages: decryptedMessages } });
   } catch (error) {
     logger.error(`Error starting chat: ${error.message}`);
     res.status(error.status || 500).json({
@@ -102,13 +102,11 @@ exports.sendMessage = async (req, res) => {
       action: "newMessage",
     });
 
-    // Update message status to "delivered" if the other participant is online
-    // This assumes emitMessage returns a promise or callback indicating success
     newMessage.status = "delivered";
     chat.messages[chat.messages.length - 1].status = "delivered";
     await chat.save();
 
-    const senderProfile = await UserProfile.findOne({ userId });
+    const senderProfile = await UserProfile.findOne({ userId }).select("fullName").lean();
     const notification = new Notification({
       userId: otherParticipant.userId,
       type: "newMessage",
@@ -137,7 +135,9 @@ exports.getChatHistory = async (req, res) => {
     const { userId } = req.user;
     const { chatId } = req.params;
 
-    const chat = await Chat.findOne({ _id: chatId });
+    const chat = await Chat.findOne({ _id: chatId })
+      .select("participants messages encryptionKey")
+      .lean();
     if (!chat) {
       throw new Error("Chat not found");
     }
@@ -148,7 +148,7 @@ exports.getChatHistory = async (req, res) => {
 
     const decryptedEncryptionKey = decryptKey(chat.encryptionKey);
     const decryptedMessages = chat.messages.map((msg) => ({
-      ...msg.toObject(),
+      ...msg,
       message: decrypt(msg.encryptedMessage, decryptedEncryptionKey),
     }));
 
@@ -166,7 +166,7 @@ exports.markMessagesAsRead = async (req, res) => {
     const { userId } = req.user;
     const { chatId } = req.params;
 
-    const chat = await Chat.findOne({ _id: chatId });
+    const chat = await Chat.findOne({ _id: chatId }).select("participants messages");
     if (!chat) {
       throw new Error("Chat not found");
     }
@@ -221,7 +221,10 @@ exports.getUserChats = async (req, res) => {
 
     const chats = await Chat.find({
       "participants.userId": userId,
-    }).sort({ updatedAt: -1 });
+    })
+      .select("participants messages encryptionKey updatedAt")
+      .sort({ updatedAt: -1 })
+      .lean();
 
     const enrichedChats = await Promise.all(
       chats.map(async (chat) => {
@@ -230,11 +233,11 @@ exports.getUserChats = async (req, res) => {
         if (latestMessage) {
           const decryptedMessage = decrypt(latestMessage.encryptedMessage, decryptedEncryptionKey);
           return {
-            ...chat.toObject(),
-            latestMessage: { ...latestMessage.toObject(), message: decryptedMessage },
+            ...chat,
+            latestMessage: { ...latestMessage, message: decryptedMessage },
           };
         }
-        return chat.toObject();
+        return chat;
       })
     );
 
@@ -252,7 +255,7 @@ exports.deleteChat = async (req, res) => {
     const { userId } = req.user;
     const { chatId } = req.params;
 
-    const chat = await Chat.findOne({ _id: chatId });
+    const chat = await Chat.findOne({ _id: chatId }).select("participants").lean();
     if (!chat) {
       throw new Error("Chat not found");
     }
@@ -285,7 +288,7 @@ exports.deleteMessage = async (req, res) => {
     const { userId } = req.user;
     const { chatId, messageId } = req.params;
 
-    const chat = await Chat.findOne({ _id: chatId });
+    const chat = await Chat.findOne({ _id: chatId }).select("participants messages");
     if (!chat) {
       throw new Error("Chat not found");
     }
@@ -336,7 +339,7 @@ exports.editMessage = async (req, res) => {
       throw new Error("New message must be a non-empty string");
     }
 
-    const chat = await Chat.findOne({ _id: chatId });
+    const chat = await Chat.findOne({ _id: chatId }).select("participants messages encryptionKey");
     if (!chat) {
       throw new Error("Chat not found");
     }

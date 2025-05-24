@@ -1,5 +1,6 @@
 const { Server } = require("socket.io");
 const Notification = require("../models/notification/Notification");
+require("dotenv").config();
 
 const socketMap = new Map();
 let io;
@@ -7,8 +8,9 @@ let io;
 const initSocket = (server) => {
   io = new Server(server, {
     cors: {
-      origin: "*",
+      origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",") : ["http://localhost:3000"],
       methods: ["GET", "POST"],
+      credentials: true,
     },
   });
 

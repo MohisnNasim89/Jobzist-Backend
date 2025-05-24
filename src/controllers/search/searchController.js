@@ -1,5 +1,6 @@
 const UserProfile = require("../../models/user/UserProfile");
 const Company = require("../../models/company/Company");
+const logger = require("../../utils/logger");
 const { checkUserExists } = require("../../utils/checks");
 
 exports.searchUsersAndCompanies = async (req, res) => {
@@ -14,14 +15,18 @@ exports.searchUsersAndCompanies = async (req, res) => {
       fullName: { $regex: query, $options: "i" },
       isDeleted: false,
     })
+      .select("fullName userId")
       .populate("userId", "email role")
-      .limit(10);
+      .limit(10)
+      .lean();
 
     const companies = await Company.find({
       name: { $regex: query, $options: "i" },
       isDeleted: false,
     })
-      .limit(10);
+      .select("name")
+      .limit(10)
+      .lean();
 
     res.status(200).json({
       message: "Search results retrieved successfully",
@@ -29,6 +34,7 @@ exports.searchUsersAndCompanies = async (req, res) => {
       companies,
     });
   } catch (error) {
+    logger.error(`Error searching users and companies: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while searching",
     });
@@ -40,29 +46,33 @@ exports.getConnectionSuggestions = async (req, res) => {
     const { userId } = req.params;
     const { userId: authenticatedUserId } = req.user;
 
-    checkUserExists(userId);
-    checkUserExists(authenticatedUserId, "Unauthorized: You can only get suggestions for yourself");
+    checkUserExists(userId).lean();
+    checkUserExists(authenticatedUserId, "Unauthorized: You can only get suggestions for yourself").lean();
 
-    const userProfile = await UserProfile.findOne({ userId });
+    const userProfile = await UserProfile.findOne({ userId })
+      .select("_id connections userId")
+      .lean();
     if (!userProfile) {
       throw new Error("User profile not found");
     }
 
-    // Find mutual connections
     const connections = userProfile.connections;
     const suggestions = await UserProfile.find({
       _id: { $ne: userProfile._id },
       connections: { $in: connections },
       isDeleted: false,
     })
+      .select("fullName userId")
       .populate("userId", "email role")
-      .limit(10);
+      .limit(10)
+      .lean();
 
     res.status(200).json({
       message: "Connection suggestions retrieved successfully",
       suggestions,
     });
   } catch (error) {
+    logger.error(`Error retrieving connection suggestions: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving connection suggestions",
     });

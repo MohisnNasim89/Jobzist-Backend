@@ -1,6 +1,7 @@
 const Post = require("../../models/post/Posts");
 const Job = require("../../models/job/Job");
 const UserProfile = require("../../models/user/UserProfile");
+const logger = require("../../utils/logger");
 const { checkUserIdMatch, renderProfileWithFallback } = require("../../utils/checks");
 
 exports.getFeed = async (req, res) => {
@@ -10,7 +11,9 @@ exports.getFeed = async (req, res) => {
 
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only view your own feed");
 
-    const userProfile = await UserProfile.findOne({ userId });
+    const userProfile = await UserProfile.findOne({ userId })
+      .select("connections followedCompanies")
+      .lean();
     if (!userProfile) {
       throw new Error("User profile not found");
     }
@@ -20,30 +23,36 @@ exports.getFeed = async (req, res) => {
       visibility: "public",
       isDeleted: false,
     })
+      .select("userId content likes comments visibility isDeleted createdAt tags")
       .populate("userId", "email role")
       .populate("tags.id", "name")
       .sort({ createdAt: -1 })
-      .limit(20);
+      .limit(20)
+      .lean();
 
     const publicPosts = await Post.find({
       userId: { $nin: userProfile.connections },
       visibility: "public",
       isDeleted: false,
     })
+      .select("userId content likes comments visibility isDeleted createdAt tags")
       .populate("userId", "email role")
       .populate("tags.id", "name")
       .sort({ createdAt: -1 })
-      .limit(10);
+      .limit(10)
+      .lean();
 
     const jobs = await Job.find({
       companyId: { $in: userProfile.followedCompanies },
       status: "Open",
       isDeleted: false,
     })
+      .select("_id title companyId postedBy location jobType salary experienceLevel applicationDeadline status createdAt")
       .populate({ path: "companyId", select: "name logo", match: { isDeleted: false } })
       .populate({ path: "postedBy", populate: { path: "profileId", select: "fullName", match: { isDeleted: false } } })
       .sort({ createdAt: -1 })
-      .limit(10);
+      .limit(10)
+      .lean();
 
     const jobProfiles = jobs.map((job) => renderProfileWithFallback(job, "job", {
       _id: job._id,
@@ -70,6 +79,7 @@ exports.getFeed = async (req, res) => {
       feed,
     });
   } catch (error) {
+    logger.error(`Error retrieving feed: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving the feed",
     });

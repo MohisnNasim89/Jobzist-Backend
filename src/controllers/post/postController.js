@@ -15,11 +15,11 @@ exports.createPost = async (req, res) => {
     const { userId } = req.user;
     const { content, visibility, tags } = req.body;
 
-    await checkUserExists(userId);
+    await checkUserExists(userId).lean();
 
     if (tags && tags.length > 0) {
       for (const tag of tags) {
-        await checkUserOrCompanyExists(tag.type, tag.id);
+        await checkUserOrCompanyExists(tag.type, tag.id).lean();
       }
     }
 
@@ -44,7 +44,9 @@ exports.createPost = async (req, res) => {
     await post.save();
 
     if (post.visibility === "public") {
-      const userProfile = await UserProfile.findOne({ userId });
+      const userProfile = await UserProfile.findOne({ userId })
+        .select("fullName connections")
+        .lean();
       if (userProfile && userProfile.connections.length > 0) {
         const notifications = userProfile.connections.map((connectionId) => ({
           userId: connectionId,
@@ -81,7 +83,9 @@ exports.getPost = async (req, res) => {
     const { postId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId);
+    const post = await checkPostExists(postId)
+      .select("visibility userId")
+      .lean();
 
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
@@ -101,7 +105,7 @@ exports.getUserPosts = async (req, res) => {
     const { userId } = req.params;
     const authenticatedUserId = req.user.userId;
 
-    await checkUserExists(userId);
+    await checkUserExists(userId).lean();
 
     const query = { userId, isDeleted: false };
     if (userId.toString() !== authenticatedUserId.toString()) {
@@ -109,9 +113,11 @@ exports.getUserPosts = async (req, res) => {
     }
 
     const posts = await Post.find(query)
+      .select("userId content visibility tags media createdAt")
       .populate("userId", "email role")
       .populate("tags.id", "name")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     return res.status(200).json({ posts });
   } catch (error) {
@@ -128,12 +134,12 @@ exports.updatePost = async (req, res) => {
     const { userId } = req.user;
     const updates = req.body;
 
-    const post = await checkPostExists(postId);
+    const post = await checkPostExists(postId).lean();
     checkPostOwnership(post, userId);
 
     if (updates.tags && updates.tags.length > 0) {
       for (const tag of updates.tags) {
-        await checkUserOrCompanyExists(tag.type, tag.id);
+        await checkUserOrCompanyExists(tag.type, tag.id).lean();
       }
     }
 
@@ -149,12 +155,12 @@ exports.updatePost = async (req, res) => {
         const fileType = file.mimetype.startsWith("image/") ? "image" : "video";
         return {
           type: fileType,
-          url: file.path, // Cloudinary URL
+          url: file.path,
         };
       });
     }
 
-    await post.save();
+    await Post.findByIdAndUpdate(postId, post);
 
     const populatedPost = await Post.findById(post._id)
       .populate("userId", "email role")
@@ -177,10 +183,10 @@ exports.deletePost = async (req, res) => {
     const { postId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId);
+    const post = await checkPostExists(postId).lean();
     checkPostOwnership(post, userId);
 
-    await post.softDelete();
+    await Post.findByIdAndUpdate(postId, { isDeleted: true }); // Assuming softDelete sets isDeleted
 
     return res.status(200).json({ message: "Post deleted successfully" });
   } catch (error) {
@@ -196,23 +202,23 @@ exports.likePost = async (req, res) => {
     const { postId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId);
+    const post = await checkPostExists(postId).lean();
 
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
     }
 
     const isLiked = post.likes.includes(userId);
-    if (isLiked) {
-      post.likes = post.likes.filter((id) => id.toString() !== userId.toString());
-    } else {
-      post.likes.push(userId);
-    }
+    const update = isLiked
+      ? { $pull: { likes: userId } }
+      : { $push: { likes: userId } };
 
-    await post.save();
+    await Post.findByIdAndUpdate(postId, update);
 
     if (!isLiked && post.userId.toString() !== userId.toString()) {
-      const userProfile = await UserProfile.findOne({ userId });
+      const userProfile = await UserProfile.findOne({ userId })
+        .select("fullName")
+        .lean();
       const notification = new Notification({
         userId: post.userId,
         type: "postInteraction",
@@ -223,9 +229,10 @@ exports.likePost = async (req, res) => {
       emitNotification(post.userId.toString(), notification);
     }
 
+    const updatedPost = await Post.findById(postId).select("likes");
     return res.status(200).json({
       message: isLiked ? "Post unliked" : "Post liked",
-      likes: post.likes.length,
+      likes: updatedPost.likes.length,
     });
   } catch (error) {
     logger.error(`Error liking/unliking post: ${error.message}`);
@@ -241,22 +248,20 @@ exports.commentOnPost = async (req, res) => {
     const { userId } = req.user;
     const { content } = req.body;
 
-    const post = await checkPostExists(postId);
+    const post = await checkPostExists(postId).lean();
 
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
     }
 
-    post.comments.push({
-      userId,
-      content,
-      createdAt: new Date(),
+    await Post.findByIdAndUpdate(postId, {
+      $push: { comments: { userId, content, createdAt: new Date() } },
     });
 
-    await post.save();
-
     if (post.userId.toString() !== userId.toString()) {
-      const userProfile = await UserProfile.findOne({ userId });
+      const userProfile = await UserProfile.findOne({ userId })
+        .select("fullName")
+        .lean();
       const notification = new Notification({
         userId: post.userId,
         type: "postInteraction",
@@ -267,9 +272,14 @@ exports.commentOnPost = async (req, res) => {
       emitNotification(post.userId.toString(), notification);
     }
 
+    const updatedPost = await Post.findOne({ _id: postId, "comments.userId": userId })
+      .select("comments")
+      .lean();
+    const comment = updatedPost.comments[updatedPost.comments.length - 1];
+
     return res.status(200).json({
       message: "Comment added successfully",
-      comment: post.comments[post.comments.length - 1],
+      comment,
     });
   } catch (error) {
     logger.error(`Error commenting on post: ${error.message}`);
@@ -284,7 +294,7 @@ exports.deleteComment = async (req, res) => {
     const { postId, commentId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId);
+    const post = await checkPostExists(postId).lean();
 
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
@@ -306,8 +316,7 @@ exports.deleteComment = async (req, res) => {
       throw error;
     }
 
-    post.comments.splice(commentIndex, 1);
-    await post.save();
+    await Post.findByIdAndUpdate(postId, { $pull: { comments: { _id: commentId } } });
 
     return res.status(200).json({
       message: "Comment deleted successfully",
@@ -325,7 +334,7 @@ exports.sharePost = async (req, res) => {
     const { postId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId);
+    const post = await checkPostExists(postId).lean();
 
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
@@ -335,11 +344,12 @@ exports.sharePost = async (req, res) => {
       throw new Error("You have already shared this post");
     }
 
-    post.shares.push(userId);
-    await post.save();
+    await Post.findByIdAndUpdate(postId, { $push: { shares: userId } });
 
     if (post.userId.toString() !== userId.toString()) {
-      const userProfile = await UserProfile.findOne({ userId });
+      const userProfile = await UserProfile.findOne({ userId })
+        .select("fullName")
+        .lean();
       const notification = new Notification({
         userId: post.userId,
         type: "postInteraction",
@@ -350,9 +360,10 @@ exports.sharePost = async (req, res) => {
       emitNotification(post.userId.toString(), notification);
     }
 
+    const updatedPost = await Post.findById(postId).select("shares");
     return res.status(200).json({
       message: "Post shared successfully",
-      shares: post.shares.length,
+      shares: updatedPost.shares.length,
     });
   } catch (error) {
     logger.error(`Error sharing post: ${error.message}`);
@@ -367,23 +378,22 @@ exports.savePost = async (req, res) => {
     const { postId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId);
+    const post = await checkPostExists(postId).lean();
 
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
     }
 
     if (post.saves.includes(userId)) {
-      post.saves = post.saves.filter((id) => id.toString() !== userId.toString());
+      await Post.findByIdAndUpdate(postId, { $pull: { saves: userId } });
     } else {
-      post.saves.push(userId);
+      await Post.findByIdAndUpdate(postId, { $push: { saves: userId } });
     }
 
-    await post.save();
-
+    const updatedPost = await Post.findById(postId).select("saves");
     return res.status(200).json({
-      message: post.saves.includes(userId) ? "Post saved" : "Post unsaved",
-      saves: post.saves.length,
+      message: updatedPost.saves.includes(userId) ? "Post saved" : "Post unsaved",
+      saves: updatedPost.saves.length,
     });
   } catch (error) {
     logger.error(`Error saving/unsaving post: ${error.message}`);
@@ -398,12 +408,11 @@ exports.togglePostVisibility = async (req, res) => {
     const { postId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId);
+    const post = await checkPostExists(postId).lean();
     checkPostOwnership(post, userId);
 
     const newVisibility = post.visibility === "public" ? "private" : "public";
-    post.visibility = newVisibility;
-    await post.save();
+    await Post.findByIdAndUpdate(postId, { visibility: newVisibility });
 
     const populatedPost = await Post.findById(post._id)
       .populate("userId", "email role")

@@ -4,6 +4,7 @@ const JobSeeker = require("../../models/user/JobSeeker");
 const UserProfile = require("../../models/user/UserProfile");
 const Notification = require("../../models/notification/Notification");
 const Resume = require("../../models/resume/ResumeModel");
+const logger = require("../../utils/logger");
 
 const {
   checkUserExists,
@@ -25,11 +26,8 @@ exports.createJob = async (req, res) => {
     let companyId = null;
     let company = null;
 
-    
-
     if (role === "company_admin") {
       const companyAdmin = await checkCompanyAdminExists(userId);
-      console.log(companyAdmin);
       companyId = companyAdmin.companyId;
       company = await checkCompanyExists(companyId);
     } else if (role === "employer") {
@@ -57,7 +55,9 @@ exports.createJob = async (req, res) => {
       company.jobListings.push({ jobId: job._id });
       await company.save();
 
-      const followers = await UserProfile.find({ followedCompanies: companyId });
+      const followers = await UserProfile.find({ followedCompanies: companyId })
+        .select("userId followedCompanies")
+        .lean();
       if (followers.length > 0) {
         const notifications = followers.map((follower) => ({
           userId: follower.userId,
@@ -104,6 +104,7 @@ exports.createJob = async (req, res) => {
       job: jobProfile,
     });
   } catch (error) {
+    logger.error(`Error creating job: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while creating the job",
     });
@@ -151,7 +152,9 @@ exports.updateJob = async (req, res) => {
 
     await job.save();
 
-    const company = job.companyId ? await Company.findOne({ _id: job.companyId, isDeleted: false }) : null;
+    const company = job.companyId ? await Company.findOne({ _id: job.companyId, isDeleted: false })
+      .select("_id name logo")
+      .lean() : null;
 
     const jobProfile = renderProfileWithFallback(job, "job", {
       _id: job._id,
@@ -176,6 +179,7 @@ exports.updateJob = async (req, res) => {
       job: jobProfile,
     });
   } catch (error) {
+    logger.error(`Error updating job: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while updating the job",
     });
@@ -187,7 +191,7 @@ exports.deleteJob = async (req, res) => {
     const { jobId } = req.params;
     const { role, userId } = req.user;
 
-    const job = await checkJobExists(jobId);
+    const job = await checkJobExists(jobId).lean();
     checkRole(role, ["company_admin", "employer"], "Unauthorized: Only company admins and employers can delete jobs");
 
     if (role === "employer" && job.postedBy.toString() !== userId) {
@@ -202,7 +206,7 @@ exports.deleteJob = async (req, res) => {
     }
 
     if (job.companyId) {
-      const company = await checkCompanyExists(job.companyId);
+      const company = await checkCompanyExists(job.companyId).select("jobListings");
       company.jobListings = company.jobListings.filter(
         (listing) => listing.jobId.toString() !== jobId.toString()
       );
@@ -228,10 +232,11 @@ exports.deleteJob = async (req, res) => {
       { $pull: { savedJobs: { jobId } } }
     );
 
-    await job.softDelete();
+    await Job.findById(jobId).then(job => job.softDelete());
 
     res.status(200).json({ message: "Job deleted successfully" });
   } catch (error) {
+    logger.error(`Error deleting job: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while deleting the job",
     });
@@ -250,7 +255,9 @@ exports.hireCandidate = async (req, res) => {
       throw new Error("Unauthorized: You can only hire for jobs you posted");
     }
 
-    const jobSeeker = await JobSeeker.findOne({ _id: jobSeekerId, isDeleted: false });
+    const jobSeeker = await JobSeeker.findOne({ _id: jobSeekerId, isDeleted: false })
+      .select("userId status")
+      .lean();
     if (!jobSeeker) {
       throw new Error("Job seeker not found");
     }
@@ -279,7 +286,7 @@ exports.hireCandidate = async (req, res) => {
     await employer.save();
 
     jobSeeker.status = "Hired";
-    await jobSeeker.save();
+    await JobSeeker.findByIdAndUpdate(jobSeekerId, { status: "Hired" });
 
     await job.save();
 
@@ -294,6 +301,7 @@ exports.hireCandidate = async (req, res) => {
 
     res.status(200).json({ message: "Candidate hired successfully" });
   } catch (error) {
+    logger.error(`Error hiring candidate: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while hiring the candidate",
     });
@@ -340,7 +348,9 @@ exports.toggleJobStatus = async (req, res) => {
       });
     }
 
-    const company = job.companyId ? await Company.findOne({ _id: job.companyId, isDeleted: false }) : null;
+    const company = job.companyId ? await Company.findOne({ _id: job.companyId, isDeleted: false })
+      .select("_id name logo")
+      .lean() : null;
 
     const jobProfile = renderProfileWithFallback(job, "job", {
       _id: job._id,
@@ -365,6 +375,7 @@ exports.toggleJobStatus = async (req, res) => {
       job: jobProfile,
     });
   } catch (error) {
+    logger.error(`Error toggling job status: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while toggling job status",
     });
@@ -378,7 +389,7 @@ exports.previewApplicantResume = async (req, res) => {
 
     checkRole(role, ["employer"], "Unauthorized: Only employers can preview resumes");
 
-    const job = await checkJobExists(jobId);
+    const job = await checkJobExists(jobId).lean();
     if (job.postedBy.toString() !== userId) {
       throw new Error("Unauthorized: You can only preview resumes for jobs you posted");
     }
@@ -388,7 +399,9 @@ exports.previewApplicantResume = async (req, res) => {
       throw new Error("This job seeker has not applied for the job");
     }
 
-    const resume = await Resume.findOne({ userId: jobSeekerId, isDeleted: false });
+    const resume = await Resume.findOne({ userId: jobSeekerId, isDeleted: false })
+      .select("userId fullName bio location contactInformation socialLinks education experiences projects skills uploadedResume")
+      .lean();
     if (!resume) {
       throw new Error("Resume not found for this job seeker");
     }
@@ -412,6 +425,7 @@ exports.previewApplicantResume = async (req, res) => {
       atsScore: applicant.atsScore,
     });
   } catch (error) {
+    logger.error(`Error previewing applicant resume: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while previewing the resume",
     });
@@ -425,7 +439,7 @@ exports.downloadApplicantResume = async (req, res) => {
 
     checkRole(role, ["employer"], "Unauthorized: Only employers can download resumes");
 
-    const job = await checkJobExists(jobId);
+    const job = await checkJobExists(jobId).lean();
     if (job.postedBy.toString() !== userId) {
       throw new Error("Unauthorized: You can only download resumes for jobs you posted");
     }
@@ -435,7 +449,9 @@ exports.downloadApplicantResume = async (req, res) => {
       throw new Error("This job seeker has not applied for the job");
     }
 
-    const resume = await Resume.findOne({ userId: jobSeekerId, isDeleted: false });
+    const resume = await Resume.findOne({ userId: jobSeekerId, isDeleted: false })
+      .select("userId uploadedResume")
+      .lean();
     if (!resume) {
       throw new Error("Resume not found for this job seeker");
     }
@@ -449,6 +465,7 @@ exports.downloadApplicantResume = async (req, res) => {
       downloadUrl: resume.uploadedResume,
     });
   } catch (error) {
+    logger.error(`Error downloading applicant resume: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving the resume download link",
     });

@@ -1,4 +1,5 @@
 const Company = require("../models/company/Company");
+const logger = require("../utils/logger");
 const {
   checkUserExists,
   checkUserIdMatch,
@@ -49,6 +50,7 @@ exports.uploadProfilePic = async (req, res) => {
       url: req.file.path,
     });
   } catch (error) {
+    logger.error(`Error uploading profile picture: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while uploading the profile picture",
     });
@@ -87,6 +89,7 @@ exports.uploadResume = async (req, res) => {
       url: req.file.path,
     });
   } catch (error) {
+    logger.error(`Error uploading resume: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while uploading the resume",
     });

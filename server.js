@@ -65,13 +65,12 @@ app.use((req, res, next) => {
 });
 
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  logger.error(err.stack);
   res.status(err.status || 500).json({
     message: err.message || "Server error",
   });
 });
 
-// Error Middleware
 app.use(errorMiddleware);
 
 let server;

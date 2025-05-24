@@ -3,6 +3,7 @@ const UserProfile = require("../../models/user/UserProfile");
 const JobSeeker = require("../../models/user/JobSeeker");
 const Employer = require("../../models/user/Employer");
 const CompanyAdmin = require("../../models/company/CompanyAdmin");
+const logger = require("../../utils/logger");
 const { checkUserExists, checkUserIdMatch, checkUserProfileExists, renderProfileWithFallback } = require("../../utils/checks");
 
 exports.createUserProfile = async (req, res) => {
@@ -11,9 +12,11 @@ exports.createUserProfile = async (req, res) => {
     const authenticatedUserId = req.user.userId;
 
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only create a profile for yourself");
-    const user = await checkUserExists(userId);
+    const user = await checkUserExists(userId).select("_id role");
 
-    let userProfile = await UserProfile.findOne({ userId, isDeleted: false });
+    let userProfile = await UserProfile.findOne({ userId, isDeleted: false })
+      .select("userId isDeleted")
+      .lean();
     if (userProfile) {
       throw new Error("User profile already exists. Use the update endpoint to modify it.");
     }
@@ -34,8 +37,7 @@ exports.createUserProfile = async (req, res) => {
     });
     await userProfile.save();
 
-    user.profileId = userProfile._id;
-    await user.save();
+    await User.findByIdAndUpdate(userId, { profileId: userProfile._id });
 
     const roleSpecificModels = {
       job_seeker: JobSeeker,
@@ -45,16 +47,18 @@ exports.createUserProfile = async (req, res) => {
 
     if (roleSpecificModels[user.role]) {
       const RoleSpecificModel = roleSpecificModels[user.role];
-      let roleSpecificData = await RoleSpecificModel.findOne({ userId, isDeleted: false });
+      let roleSpecificData = await RoleSpecificModel.findOne({ userId, isDeleted: false })
+        .select("userId isDeleted")
+        .lean();
       if (!roleSpecificData) {
         roleSpecificData = new RoleSpecificModel({ userId });
         await roleSpecificData.save();
-        user.roleSpecificData = roleSpecificData._id;
-        await user.save();
+        await User.findByIdAndUpdate(userId, { roleSpecificData: roleSpecificData._id });
       }
     }
 
     const updatedUser = await User.findOne({ _id: userId, isDeleted: false })
+      .select("authId email role profileId roleSpecificData")
       .populate({ path: "profileId", match: { isDeleted: false } })
       .populate({ path: "roleSpecificData", match: { isDeleted: false } });
 
@@ -75,6 +79,7 @@ exports.createUserProfile = async (req, res) => {
       profile: profileData,
     });
   } catch (error) {
+    logger.error(`Error creating user profile: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while creating the user profile",
     });
@@ -89,8 +94,10 @@ exports.getCurrentUser = async (req, res) => {
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only access your own profile");
 
     const user = await User.findOne({ _id: userId, isDeleted: false })
+      .select("authId email role profileId roleSpecificData")
       .populate({ path: "profileId", match: { isDeleted: false } })
-      .populate({ path: "roleSpecificData", match: { isDeleted: false } });
+      .populate({ path: "roleSpecificData", match: { isDeleted: false } })
+      .lean();
 
     if (!user) {
       throw new Error("User not found");
@@ -108,6 +115,7 @@ exports.getCurrentUser = async (req, res) => {
       profile: profileData,
     });
   } catch (error) {
+    logger.error(`Error retrieving user profile: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving the user profile",
     });
@@ -120,12 +128,12 @@ exports.updateUserProfile = async (req, res) => {
     const authenticatedUserId = req.user.userId;
 
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only update your own profile");
-    const user = await checkUserExists(userId);
+    const user = await checkUserExists(userId).select("_id role");
 
     const updates = req.body;
     const role = user.role;
 
-    const userProfile = await checkUserProfileExists(userId);
+    const userProfile = await checkUserProfileExists(userId).select("_id");
 
     const allowedProfileUpdates = [
       "fullName",
@@ -135,12 +143,13 @@ exports.updateUserProfile = async (req, res) => {
       "socialLinks",
       "profilePicture",
     ];
+    const profileUpdates = {};
     Object.keys(updates).forEach((key) => {
       if (allowedProfileUpdates.includes(key)) {
-        userProfile[key] = updates[key];
+        profileUpdates[key] = updates[key];
       }
     });
-    await userProfile.save();
+    await UserProfile.findByIdAndUpdate(userProfile._id, profileUpdates);
 
     const roleSpecificModels = {
       job_seeker: {
@@ -172,21 +181,25 @@ exports.updateUserProfile = async (req, res) => {
 
     if (roleSpecificModels[role]) {
       const { model: RoleSpecificModel, allowedUpdates } = roleSpecificModels[role];
-      let roleSpecificData = await RoleSpecificModel.findOne({ userId, isDeleted: false });
+      let roleSpecificData = await RoleSpecificModel.findOne({ userId, isDeleted: false })
+        .select("_id")
+        .lean();
       if (!roleSpecificData) {
         roleSpecificData = new RoleSpecificModel({ userId });
       }
 
+      const roleSpecificUpdates = {};
       Object.keys(updates).forEach((key) => {
         if (allowedUpdates.includes(key)) {
-          roleSpecificData[key] = updates[key];
+          roleSpecificUpdates[key] = updates[key];
         }
       });
 
-      await roleSpecificData.save();
+      await RoleSpecificModel.findByIdAndUpdate(roleSpecificData._id || roleSpecificData, roleSpecificUpdates);
     }
 
     const updatedUser = await User.findOne({ _id: userId, isDeleted: false })
+      .select("authId email role profileId roleSpecificData")
       .populate({ path: "profileId", match: { isDeleted: false } })
       .populate({ path: "roleSpecificData", match: { isDeleted: false } });
 
@@ -207,6 +220,7 @@ exports.updateUserProfile = async (req, res) => {
       profile: profileData,
     });
   } catch (error) {
+    logger.error(`Error updating user profile: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while updating the user profile",
     });
@@ -219,11 +233,13 @@ exports.deleteUser = async (req, res) => {
     const authenticatedUserId = req.user.userId;
 
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only delete your own profile");
-    const user = await checkUserExists(userId);
+    const user = await checkUserExists(userId).select("_id").lean();
 
-    await user.softDelete();
+    await User.findByIdAndUpdate(userId, { isDeleted: true }); // Assuming softDelete sets isDeleted
+
     return res.status(200).json({ message: "User account deleted successfully" });
   } catch (error) {
+    logger.error(`Error deleting user account: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while deleting the user",
     });

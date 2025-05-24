@@ -1,5 +1,6 @@
 const User = require("../../models/user/Users");
 const Job = require("../../models/job/Job");
+const logger = require("../../utils/logger");
 const Company = require("../../models/company/Company");
 const CompanyAdmin = require("../../models/company/CompanyAdmin");
 const { checkRole } = require("../../utils/checks");
@@ -10,7 +11,9 @@ exports.getCompanyUsers = async (req, res) => {
 
     checkRole(role, ["company_admin"], "Unauthorized: Only company admins can view company users");
 
-    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false });
+    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false })
+      .select("companyId status permissions")
+      .lean();
     if (!companyAdmin || companyAdmin.status !== "Active") {
       throw new Error("Failed to retrieve company users: Company admin not found or inactive");
     }
@@ -19,19 +22,21 @@ exports.getCompanyUsers = async (req, res) => {
       throw new Error("Failed to retrieve company users: Permission denied");
     }
 
-    const company = await Company.findById(companyAdmin.companyId).select("employees");
+    const company = await Company.findById(companyAdmin.companyId).select("employees").lean();
     if (!company) {
       throw new Error("Failed to retrieve company users: Company not found");
     }
 
-    const users = await User.find({ _id: { $in: company.employees }, isDeleted: false }).select("email role createdAt updatedAt");
+    const users = await User.find({ _id: { $in: company.employees }, isDeleted: false })
+      .select("email role createdAt updatedAt")
+      .lean();
 
     res.status(200).json({
       message: "Company users retrieved successfully",
       users,
     });
   } catch (error) {
-    console.error("Error retrieving company users:", error.message);
+    logger.error(`Error retrieving company users: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to retrieve company users: An unexpected error occurred",
     });
@@ -45,7 +50,9 @@ exports.assignCompanyUserRole = async (req, res) => {
 
     checkRole(role, ["company_admin"], "Unauthorized: Only company admins can assign company user roles");
 
-    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false });
+    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false })
+      .select("companyId status permissions")
+      .lean();
     if (!companyAdmin || companyAdmin.status !== "Active") {
       throw new Error("Failed to assign company user role: Company admin not found or inactive");
     }
@@ -54,7 +61,7 @@ exports.assignCompanyUserRole = async (req, res) => {
       throw new Error("Failed to assign company user role: Permission denied");
     }
 
-    const company = await Company.findById(companyAdmin.companyId).select("employees");
+    const company = await Company.findById(companyAdmin.companyId).select("employees").lean();
     if (!company) {
       throw new Error("Failed to assign company user role: Company not found");
     }
@@ -81,7 +88,7 @@ exports.assignCompanyUserRole = async (req, res) => {
       user: { userId: targetUserId, role: newRole },
     });
   } catch (error) {
-    console.error("Error assigning company user role:", error.message);
+    logger.error(`Error assigning company user role: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to assign company user role: An unexpected error occurred",
     });
@@ -95,7 +102,9 @@ exports.fireEmployer = async (req, res) => {
 
     checkRole(role, ["company_admin"], "Unauthorized: Only company admins can fire employers");
 
-    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false });
+    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false })
+      .select("companyId status permissions")
+      .lean();
     if (!companyAdmin || companyAdmin.status !== "Active") {
       throw new Error("Failed to fire employer: Company admin not found or inactive");
     }
@@ -134,7 +143,7 @@ exports.fireEmployer = async (req, res) => {
       user: { userId: targetUserId, role: targetUser.role },
     });
   } catch (error) {
-    console.error("Error firing employer:", error.message);
+    logger.error(`Error firing employer ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to fire employer: An unexpected error occurred",
     });
@@ -148,7 +157,9 @@ exports.createCompanyJob = async (req, res) => {
 
     checkRole(role, ["company_admin"], "Unauthorized: Only company admins can create company jobs");
 
-    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false });
+    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false })
+      .select("companyId status permissions")
+      .lean();
     if (!companyAdmin || companyAdmin.status !== "Active") {
       throw new Error("Failed to create company job: Company admin not found or inactive");
     }
@@ -196,7 +207,7 @@ exports.createCompanyJob = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error creating company job:", error.message);
+    logger.error(`Error creating company job:, ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to create company job: An unexpected error occurred",
     });
@@ -211,7 +222,9 @@ exports.updateCompanyJob = async (req, res) => {
 
     checkRole(role, ["company_admin"], "Unauthorized: Only company admins can update company jobs");
 
-    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false });
+    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false })
+      .select("companyId status permissions")
+      .lean();
     if (!companyAdmin || companyAdmin.status !== "Active") {
       throw new Error("Failed to update company job: Company admin not found or inactive");
     }
@@ -220,7 +233,8 @@ exports.updateCompanyJob = async (req, res) => {
       throw new Error("Failed to update company job: Permission denied");
     }
 
-    const job = await Job.findOne({ _id: jobId, companyId: companyAdmin.companyId, isDeleted: false }).select("_id");
+    const job = await Job.findOne({ _id: jobId, companyId: companyAdmin.companyId, isDeleted: false })
+      .select("_id companyId title location jobType salary experienceLevel status updatedAt");
     if (!job) {
       throw new Error("Failed to update company job: Job not found or not associated with this company");
     }
@@ -260,7 +274,7 @@ exports.updateCompanyJob = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error updating company job:", error.message);
+    logger.error(`Error updating company job: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to update company job: An unexpected error occurred",
     });
@@ -274,7 +288,9 @@ exports.deleteCompanyJob = async (req, res) => {
 
     checkRole(role, ["company_admin"], "Unauthorized: Only company admins can delete company jobs");
 
-    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false });
+    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false })
+      .select("companyId status permissions")
+      .lean();
     if (!companyAdmin || companyAdmin.status !== "Active") {
       throw new Error("Failed to delete company job: Company admin not found or inactive");
     }
@@ -283,12 +299,14 @@ exports.deleteCompanyJob = async (req, res) => {
       throw new Error("Failed to delete company job: Permission denied");
     }
 
-    const job = await Job.findOne({ _id: jobId, companyId: companyAdmin.companyId }).select("_id");
+    const job = await Job.findOne({ _id: jobId, companyId: companyAdmin.companyId })
+      .select("_id companyId")
+      .lean();
     if (!job) {
       throw new Error("Failed to delete company job: Job not found or not associated with this company");
     }
 
-    await job.softDelete();
+    await Job.findById(jobId).then(job => job.softDelete());
 
     const company = await Company.findById(companyAdmin.companyId).select("jobListings");
     if (company) {
@@ -300,7 +318,7 @@ exports.deleteCompanyJob = async (req, res) => {
       message: "Company job deleted successfully",
     });
   } catch (error) {
-    console.error("Error deleting company job:", error.message);
+    logger.error(`Error deleting company job: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to delete company job: An unexpected error occurred",
     });
@@ -313,7 +331,9 @@ exports.getCompanyReports = async (req, res) => {
 
     checkRole(role, ["company_admin"], "Unauthorized: Only company admins can view company reports");
 
-    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false });
+    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false })
+      .select("companyId status permissions")
+      .lean();
     if (!companyAdmin || companyAdmin.status !== "Active") {
       throw new Error("Failed to retrieve company reports: Company admin not found or inactive");
     }
@@ -322,7 +342,7 @@ exports.getCompanyReports = async (req, res) => {
       throw new Error("Failed to retrieve company reports: Permission denied");
     }
 
-    const company = await Company.findById(companyAdmin.companyId).select("employees jobListings");
+    const company = await Company.findById(companyAdmin.companyId).select("employees jobListings").lean();
     if (!company) {
       throw new Error("Failed to retrieve company reports: Company not found");
     }
@@ -351,7 +371,7 @@ exports.getCompanyReports = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error retrieving company reports:", error.message);
+    logger.error(`Error retrieving company reports: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to retrieve company reports: An unexpected error occurred",
     });

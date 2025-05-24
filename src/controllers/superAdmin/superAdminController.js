@@ -4,6 +4,7 @@ const Company = require("../../models/company/Company");
 const SuperAdmin = require("../../models/user/SuperAdmin");
 const CompanyAdmin = require("../../models/company/CompanyAdmin");
 const JobSeeker = require("../../models/user/JobSeeker");
+const logger = require("../../utils/logger");
 const { checkRole } = require("../../utils/checks");
 
 exports.getAllUsers = async (req, res) => {
@@ -12,7 +13,9 @@ exports.getAllUsers = async (req, res) => {
 
     checkRole(role, ["super_admin"], "Unauthorized: Only super admins can view all users");
 
-    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false });
+    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false })
+      .select("status permissions")
+      .lean();
     if (!superAdmin || superAdmin.status !== "active") {
       throw new Error("Failed to retrieve users: Super admin not found or inactive");
     }
@@ -21,14 +24,17 @@ exports.getAllUsers = async (req, res) => {
       throw new Error("Failed to retrieve users: Permission denied");
     }
 
-    const users = await User.find({ isDeleted: false }).select("email role createdAt updatedAt").nin("role", ["super_admin"]);
+    const users = await User.find({ isDeleted: false })
+      .select("email role createdAt updatedAt")
+      .nin("role", ["super_admin"])
+      .lean();
 
     res.status(200).json({
       message: "Users retrieved successfully",
-      users: users, 
+      users: users,
     });
   } catch (error) {
-    console.error("Error retrieving users:", error.message);
+    logger.error(`Error retrieving users: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to retrieve users: An unexpected error occurred",
     });
@@ -42,7 +48,9 @@ exports.deleteUser = async (req, res) => {
 
     checkRole(role, ["super_admin"], "Unauthorized: Only super admins can delete users");
 
-    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false });
+    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false })
+      .select("status permissions")
+      .lean();
     if (!superAdmin || superAdmin.status !== "active") {
       throw new Error("Failed to delete user: Super admin not found or inactive");
     }
@@ -51,18 +59,20 @@ exports.deleteUser = async (req, res) => {
       throw new Error("Failed to delete user: Permission denied");
     }
 
-    const user = await User.findById(targetUserId).select("_id");
+    const user = await User.findById(targetUserId)
+      .select("_id")
+      .lean();
     if (!user) {
       throw new Error("Failed to delete user: Target user not found");
     }
 
-    await user.softDelete();
+    await User.findByIdAndUpdate(targetUserId, { isDeleted: true }); // Assuming softDelete sets isDeleted
 
     res.status(200).json({
       message: "User deleted successfully",
     });
   } catch (error) {
-    console.error("Error deleting user:", error.message);
+    logger.error(`Error deleting user: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to delete user: An unexpected error occurred",
     });
@@ -75,7 +85,9 @@ exports.getAllJobs = async (req, res) => {
 
     checkRole(role, ["super_admin"], "Unauthorized: Only super admins can view all jobs");
 
-    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false });
+    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false })
+      .select("status permissions")
+      .lean();
     if (!superAdmin || superAdmin.status !== "active") {
       throw new Error("Failed to retrieve jobs: Super admin not found or inactive");
     }
@@ -84,16 +96,17 @@ exports.getAllJobs = async (req, res) => {
       throw new Error("Failed to retrieve jobs: Permission denied");
     }
 
-    const jobs = await Job.find({ isDeleted: false }).select(
-      "title companyId location jobType salary experienceLevel status createdAt"
-    ).populate("companyId", "name logo");
+    const jobs = await Job.find({ isDeleted: false })
+      .select("title companyId location jobType salary experienceLevel status createdAt")
+      .populate("companyId", "name logo")
+      .lean();
 
     res.status(200).json({
       message: "Jobs retrieved successfully",
       jobs,
     });
   } catch (error) {
-    console.error("Error retrieving jobs:", error.message);
+    logger.error(`Error retrieving jobs: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to retrieve jobs: An unexpected error occurred",
     });
@@ -107,7 +120,9 @@ exports.deleteJob = async (req, res) => {
 
     checkRole(role, ["super_admin"], "Unauthorized: Only super admins can delete jobs");
 
-    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false });
+    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false })
+      .select("status permissions")
+      .lean();
     if (!superAdmin || superAdmin.status !== "active") {
       throw new Error("Failed to delete job: Super admin not found or inactive");
     }
@@ -116,18 +131,20 @@ exports.deleteJob = async (req, res) => {
       throw new Error("Failed to delete job: Permission denied");
     }
 
-    const job = await Job.findById(jobId).select("_id");
+    const job = await Job.findById(jobId)
+      .select("_id")
+      .lean();
     if (!job) {
       throw new Error("Failed to delete job: Job not found");
     }
 
-    await job.softDelete();
+    await Job.findByIdAndUpdate(jobId, { isDeleted: true }); // Assuming softDelete sets isDeleted
 
     res.status(200).json({
       message: "Job deleted successfully",
     });
   } catch (error) {
-    console.error("Error deleting job:", error.message);
+    logger.error(`Error deleting job: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to delete job: An unexpected error occurred",
     });
@@ -140,7 +157,9 @@ exports.getAllCompanies = async (req, res) => {
 
     checkRole(role, ["super_admin"], "Unauthorized: Only super admins can view all companies");
 
-    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false });
+    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false })
+      .select("status permissions")
+      .lean();
     if (!superAdmin || superAdmin.status !== "active") {
       throw new Error("Failed to retrieve companies: Super admin not found or inactive");
     }
@@ -149,14 +168,16 @@ exports.getAllCompanies = async (req, res) => {
       throw new Error("Failed to retrieve companies: Permission denied");
     }
 
-    const companies = await Company.find({ isDeleted: false }).select("name logo location industry createdAt");
+    const companies = await Company.find({ isDeleted: false })
+      .select("name logo location industry createdAt")
+      .lean();
 
     res.status(200).json({
       message: "Companies retrieved successfully",
       companies,
     });
   } catch (error) {
-    console.error("Error retrieving companies:", error.message);
+    logger.error(`Error retrieving companies: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to retrieve companies: An unexpected error occurred",
     });
@@ -170,7 +191,9 @@ exports.deleteCompany = async (req, res) => {
 
     checkRole(role, ["super_admin"], "Unauthorized: Only super admins can delete companies");
 
-    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false });
+    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false })
+      .select("status permissions")
+      .lean();
     if (!superAdmin || superAdmin.status !== "active") {
       throw new Error("Failed to delete company: Super admin not found or inactive");
     }
@@ -179,18 +202,20 @@ exports.deleteCompany = async (req, res) => {
       throw new Error("Failed to delete company: Permission denied");
     }
 
-    const company = await Company.findById(companyId).select("_id");
+    const company = await Company.findById(companyId)
+      .select("_id")
+      .lean();
     if (!company) {
       throw new Error("Failed to delete company: Company not found");
     }
 
-    await company.softDelete();
+    await Company.findByIdAndUpdate(companyId, { isDeleted: true }); // Assuming softDelete sets isDeleted
 
     res.status(200).json({
       message: "Company deleted successfully",
     });
   } catch (error) {
-    console.error("Error deleting company:", error.message);
+    logger.error(`Error deleting company: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to delete company: An unexpected error occurred",
     });
@@ -203,7 +228,9 @@ exports.getSystemReports = async (req, res) => {
 
     checkRole(role, ["super_admin"], "Unauthorized: Only super admins can view system reports");
 
-    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false });
+    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false })
+      .select("status permissions")
+      .lean();
     if (!superAdmin || superAdmin.status !== "active") {
       throw new Error("Failed to retrieve system reports: Super admin not found or inactive");
     }
@@ -237,7 +264,7 @@ exports.getSystemReports = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error retrieving system reports:", error.message);
+    logger.error(`Error retrieving system reports: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to retrieve system reports: An unexpected error occurred",
     });
@@ -251,7 +278,9 @@ exports.assignAdmin = async (req, res) => {
 
     checkRole(role, ["super_admin"], "Unauthorized: Only super admins can assign admins");
 
-    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false });
+    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false })
+      .select("status permissions")
+      .lean();
     if (!superAdmin || superAdmin.status !== "active") {
       throw new Error("Failed to assign admin: Super admin not found or inactive");
     }
@@ -260,13 +289,17 @@ exports.assignAdmin = async (req, res) => {
       throw new Error("Failed to assign admin: Permission denied");
     }
 
-    const targetUser = await User.findById(targetUserId).select("role");
+    const targetUser = await User.findById(targetUserId)
+      .select("role")
+      .lean();
     if (!targetUser) {
       throw new Error("Failed to assign admin: Target user not found");
     }
 
     if (adminType === "super_admin") {
-      let adminProfile = await SuperAdmin.findOne({ userId: targetUserId, isDeleted: false });
+      let adminProfile = await SuperAdmin.findOne({ userId: targetUserId, isDeleted: false })
+        .select("permissions")
+        .lean();
       if (!adminProfile) {
         adminProfile = new SuperAdmin({
           userId: targetUserId,
@@ -284,16 +317,20 @@ exports.assignAdmin = async (req, res) => {
         adminProfile.permissions = permissions || adminProfile.permissions;
       }
       await adminProfile.save();
-      targetUser.role = "super_admin";
+      await User.findByIdAndUpdate(targetUserId, { role: "super_admin" });
     } else if (adminType === "company_admin") {
       if (!companyId) {
         throw new Error("Failed to assign admin: Company ID is required for company admin");
       }
-      const company = await Company.findById(companyId).select("_id");
+      const company = await Company.findById(companyId)
+        .select("_id")
+        .lean();
       if (!company) {
         throw new Error("Failed to assign admin: Company not found");
       }
-      let adminProfile = await CompanyAdmin.findOne({ userId: targetUserId, isDeleted: false }).select("permissions companyId");
+      let adminProfile = await CompanyAdmin.findOne({ userId: targetUserId, isDeleted: false })
+        .select("permissions companyId")
+        .lean();
       if (!adminProfile) {
         adminProfile = new CompanyAdmin({
           userId: targetUserId,
@@ -311,23 +348,21 @@ exports.assignAdmin = async (req, res) => {
         adminProfile.permissions = permissions || adminProfile.permissions;
       }
       await adminProfile.save();
-      targetUser.role = "company_admin";
+      await User.findByIdAndUpdate(targetUserId, { role: "company_admin" });
     } else {
       throw new Error("Failed to assign admin: Invalid admin type");
     }
-
-    await targetUser.save();
 
     res.status(200).json({
       message: "Admin assigned successfully",
       admin: {
         userId: targetUserId,
-        role: targetUser.role,
+        role: adminType === "super_admin" ? "super_admin" : "company_admin",
         adminType,
       },
     });
   } catch (error) {
-    console.error("Error assigning admin:", error.message);
+    logger.error(`Error assigning admin: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to assign admin: An unexpected error occurred",
     });
@@ -341,7 +376,9 @@ exports.removeAdmin = async (req, res) => {
 
     checkRole(role, ["super_admin"], "Unauthorized: Only super admins can remove admins");
 
-    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false });
+    const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false })
+      .select("status permissions")
+      .lean();
     if (!superAdmin || superAdmin.status !== "active") {
       throw new Error("Failed to remove admin: Super admin not found or inactive");
     }
@@ -350,34 +387,39 @@ exports.removeAdmin = async (req, res) => {
       throw new Error("Failed to remove admin: Permission denied");
     }
 
-    const targetUser = await User.findById(targetUserId).select("role");
+    const targetUser = await User.findById(targetUserId)
+      .select("role")
+      .lean();
     if (!targetUser) {
       throw new Error("Failed to remove admin: Target user not found");
     }
 
     if (targetUser.role === "super_admin") {
-      const adminProfile = await SuperAdmin.findOne({ userId: targetUserId, isDeleted: false }).select("_id");
+      const adminProfile = await SuperAdmin.findOne({ userId: targetUserId, isDeleted: false })
+        .select("_id")
+        .lean();
       if (adminProfile) {
-        await adminProfile.softDelete();
+        await SuperAdmin.findByIdAndUpdate(adminProfile._id, { isDeleted: true }); // Assuming softDelete sets isDeleted
       }
     } else if (targetUser.role === "company_admin") {
-      const adminProfile = await CompanyAdmin.findOne({ userId: targetUserId, isDeleted: false }).select("_id");
+      const adminProfile = await CompanyAdmin.findOne({ userId: targetUserId, isDeleted: false })
+        .select("_id")
+        .lean();
       if (adminProfile) {
-        await adminProfile.softDelete();
+        await CompanyAdmin.findByIdAndUpdate(adminProfile._id, { isDeleted: true }); // Assuming softDelete sets isDeleted
       }
     } else {
       throw new Error("Failed to remove admin: Target user is not an admin");
     }
 
-    targetUser.role = "job_seeker";
-    await targetUser.save();
+    await User.findByIdAndUpdate(targetUserId, { role: "job_seeker" });
 
     res.status(200).json({
       message: "Admin removed successfully",
-      user: { userId: targetUserId, role: targetUser.role },
+      user: { userId: targetUserId, role: "job_seeker" },
     });
   } catch (error) {
-    console.error("Error removing admin:", error.message);
+    logger.error(`Error removing admin: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "Failed to remove admin: An unexpected error occurred",
     });

@@ -41,7 +41,7 @@ exports.register = async (req, res) => {
       return res.status(400).json({ message: "Invalid role" });
     }
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email }).lean(); // lean: not modifying user object
     if (existingUser) {
       return res.status(400).json({ message: "User already exists" });
     }
@@ -92,11 +92,15 @@ exports.login = async (req, res) => {
       return res.status(403).json({ message: "Email not verified. Please verify your email to log in." });
     }
 
+    const role = userRecord.customClaims?.role || "job_seeker";
+    const RoleModel = getRoleModel(role);
+
     const user = await User.findOne({ email, isDeleted: false })
+      .select("+password")
       .populate("profileId")
       .populate({
         path: "roleSpecificData",
-        model: getRoleModel(userRecord.customClaims?.role || "job_seeker"),
+        model: RoleModel,
       });
 
     if (!user) {
@@ -136,7 +140,7 @@ exports.oauthLogin = async (req, res) => {
     if (!idToken) return res.status(400).json({ message: "ID token required" });
 
     const decodedToken = await admin.auth().verifyIdToken(idToken);
-    let user = await User.findOne({ authId: decodedToken.uid, isDeleted: false });
+    let user = await User.findOne({ authId: decodedToken.uid, isDeleted: false }).lean();
 
     let isNewUser = false;
     if (!user) {
@@ -163,7 +167,8 @@ exports.oauthLogin = async (req, res) => {
 
     user = await User.findOne({ authId: decodedToken.uid, isDeleted: false })
       .populate("profileId")
-      .populate({ path: "roleSpecificData", model: JobSeeker });
+      .populate({ path: "roleSpecificData", model: JobSeeker })
+      .lean();
 
     const token = generateToken(user._id.toString(), user.role);
     const profileData = renderProfileWithFallback(user, "user", {
@@ -192,7 +197,7 @@ exports.forgotPassword = async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ message: "Email is required" });
 
-    const user = await User.findOne({ email, isDeleted: false });
+    const user = await User.findOne({ email, isDeleted: false }).lean();
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -210,9 +215,7 @@ exports.forgotPassword = async (req, res) => {
 exports.logout = async (req, res) => {
   try {
     const { userId } = req.user;
-
     await admin.auth().revokeRefreshTokens(userId);
-
     res.status(200).json({ message: "Logout successful" });
   } catch (error) {
     logger.error(`Logout Error: ${error.message}`);

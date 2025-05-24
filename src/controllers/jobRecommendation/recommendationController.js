@@ -2,6 +2,7 @@ const Job = require("../../models/job/Job");
 const JobSeeker = require("../../models/user/JobSeeker");
 const { checkJobSeekerExists } = require("../../utils/checks");
 const { fetchSynonyms } = require("../../utils/synonym");
+const logger = require("../../utils/logger");
 
 const calculateExperienceYears = (experience) => {
   if (!experience || experience.length === 0) return 0;
@@ -34,7 +35,7 @@ const calculateMatchScore = async (job, jobSeeker) => {
   let score = (matchCount / jobSkills.length) * 40;
 
   if (
-    jobSeeker.jobPreferences?.location?.toLowerCase() === job.location.city.toLowerCase()
+    jobSeeker.jobPreferences?.location?.toLowerCase() === (job.location?.city?.toLowerCase() || "")
   ) score += 20;
 
   if (jobSeeker.jobPreferences?.jobType?.includes(job.jobType)) score += 20;
@@ -42,7 +43,7 @@ const calculateMatchScore = async (job, jobSeeker) => {
   const expYears = calculateExperienceYears(jobSeeker.experience);
   if (mapExperienceToLevel(expYears) === job.experienceLevel) score += 10;
 
-  if (jobSeeker.jobPreferences?.salaryExpectation && job.salary.max >= jobSeeker.jobPreferences.salaryExpectation) {
+  if (jobSeeker.jobPreferences?.salaryExpectation && job.salary?.max >= jobSeeker.jobPreferences.salaryExpectation) {
     score += 10;
   }
 
@@ -52,21 +53,30 @@ const calculateMatchScore = async (job, jobSeeker) => {
 exports.getJobRecommendations = async (req, res) => {
   try {
     const { userId } = req.user;
-    const jobSeeker = await checkJobSeekerExists(userId);
+    const jobSeeker = await checkJobSeekerExists(userId)
+      .select("skills jobPreferences experience")
+      .lean();
 
-    const jobs = await Job.find({ status: "Open", isDeleted: false }).populate("companyId", "name logo").lean();
+    const jobs = await Job.find({ status: "Open", isDeleted: false })
+      .select("_id title skills location jobType experienceLevel salary status isDeleted companyId")
+      .populate("companyId", "name logo")
+      .lean();
+
     const scores = await Promise.all(jobs.map(async (job) => ({
       job,
       score: await calculateMatchScore(job, jobSeeker)
     })));
 
     const recommendations = scores
-      .filter((r) => r.score > 0)
+      .filter((r) => r.score >= 50)
       .sort((a, b) => b.score - a.score)
       .map((r) => r.job);
 
     res.status(200).json({ recommendations });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+  } catch (error) {
+    logger.error(`Error fetching job recommendations: ${error.message}`);
+    res.status(error.status || 500).json({ 
+      message: error.message 
+    });
   }
 };
