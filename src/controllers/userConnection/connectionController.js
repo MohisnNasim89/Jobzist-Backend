@@ -2,7 +2,7 @@ const UserProfile = require("../../models/user/UserProfile");
 const Notification = require("../../models/notification/Notification");
 const { checkUserExists } = require("../../utils/checks");
 const { emitNotification } = require("../../socket/socket");
-const logger = require("../utils/logger");
+const logger = require("../../utils/logger");
 
 exports.sendConnectionRequest = async (req, res) => {
   try {

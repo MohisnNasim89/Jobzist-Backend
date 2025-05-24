@@ -5,7 +5,7 @@ const jobController = require("../../controllers/job/jobController");
 const jobJobSeekerController = require("../../controllers/job/jobJobSeekerController");
 const jobPublicController = require("../../controllers/job/jobPublicController");
 const jobValidation = require("../../validations/jobValidation");
-const { aiRateLimiter } = require("../../middlewares/rateLimiter");
+const {aiRateLimiter} = require("../../middlewares/rateLimiter");
 
 router.post("/create", verifyToken, jobValidation.validateCreateJob, jobController.createJob);
 

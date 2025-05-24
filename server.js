@@ -3,11 +3,12 @@ const dotenv = require("dotenv");
 const cors = require("cors");
 const morgan = require("morgan");
 const helmet = require("helmet");
-const logger = require("../../utils/logger");
+const logger = require("./src/utils/logger");
 const connectDB = require("./src/config/database/mongo");
 const upload = require("./src/config/multerConfig");
 const errorMiddleware = require("./src/middlewares/errorMiddleware");
 const { initSocket } = require("./src/socket/socket");
+const {generalRateLimiter} = require("./src/middlewares/rateLimiter");
 
 // Routes
 const authRoutes = require("./src/routes/authRoutes");
@@ -34,8 +35,8 @@ app.use(express.json());
 app.use(cors());
 app.use(morgan("dev"));
 app.use(helmet());
+app.use(generalRateLimiter); 
 
-// Make the upload middleware available to routes
 app.set("upload", upload);
 
 // Routes

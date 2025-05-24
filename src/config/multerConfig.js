@@ -1,3 +1,4 @@
+// multerConfig.js
 const multer = require("multer");
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const cloudinary = require("../config/cloudinaryConfig");
@@ -28,7 +29,7 @@ const storage = new CloudinaryStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit for media
+  limits: { fileSize: 10 * 1024 * 1024 }, 
   fileFilter: (req, file, cb) => {
     const allowedTypes = ["image/jpeg", "image/png", "image/jpg", "video/mp4", "video/mov", "application/pdf"];
     if (allowedTypes.includes(file.mimetype)) {
@@ -37,6 +38,6 @@ const upload = multer({
       cb(new Error("Unsupported file type. Allowed types: jpg, png, mp4, mov, pdf"), false);
     }
   },
-}).array("media", 5);
+});
 
-module.exports = upload;
+module.exports = upload; 
