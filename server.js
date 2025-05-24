@@ -39,21 +39,22 @@ app.use(helmet());
 app.set("upload", upload);
 
 // Routes
-app.use("/api/auth", authRoutes);
-app.use("/api/user", userProfileRoutes);
-app.use("/api/company", companyRoutes);
-app.use("/api/upload", uploadRoutes);
-app.use("/api/job", jobRoutes);
-app.use("/api/post", postRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/notifications", notificationRoutes);
-app.use("/api/feed", feedRoutes);
-app.use("/api/search", searchRoutes);
-app.use("/api/recommendations", recommendationRoutes);
-app.use("/api/chats", chatRoutes);
-app.use("/api/resume", resumeRoutes);
-app.use("/api/company-admin", companyAdminRoutes);
-app.use("/api/super-admin", superAdminRoutes);
+app.use("/api/v1/auth", authRoutes);
+app.use("/api/v1/user", userProfileRoutes);
+app.use("/api/v1/company", companyRoutes);
+app.use("/api/v1/upload", uploadRoutes);
+app.use("/api/v1/job", jobRoutes);
+app.use("/api/v1/post", postRoutes);
+app.use("/api/v1/users", userRoutes);
+app.use("/api/v1/notifications", notificationRoutes);
+app.use("/api/v1/feed", feedRoutes);
+app.use("/api/v1/search", searchRoutes);
+app.use("/api/v1/recommendations", recommendationRoutes);
+app.use("/api/v1/chats", chatRoutes);
+app.use("/api/v1/resume", resumeRoutes);
+app.use("/api/v1/company-admin", companyAdminRoutes);
+app.use("/api/v1/super-admin", superAdminRoutes);
+
 // Root Route
 app.get("/", (req, res) => {
   res.send("Jobzist Backend is Running 🚀");

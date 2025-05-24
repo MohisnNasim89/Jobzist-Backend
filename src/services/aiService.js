@@ -1,4 +1,3 @@
-// services/aiService.js
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Joi = require("joi");
 require("dotenv").config();
@@ -6,13 +5,25 @@ require("dotenv").config();
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-const sanitize = (text) => (text || "").replace(/[`]/g, "").substring(0, 1500);
+const sanitize = (text) => {
+  if (!text || typeof text !== "string") return "";
+  return text
+    .replace(/[`"'<>]/g, "")
+    .replace(/[\n\r]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .substring(0, 1000);
+};
 
 const parseJson = (text) => {
-  if (text.startsWith("```json")) {
-    text = text.replace(/```json\s*|\s*```/g, "").trim();
+  try {
+    if (text.startsWith("```json")) {
+      text = text.replace(/```json\s*|\s*```/g, "").trim();
+    }
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error("AI returned invalid JSON");
   }
-  return JSON.parse(text);
 };
 
 const validateATS = (data) => {
@@ -50,52 +61,65 @@ const validateResume = (data) => {
   return value.resume;
 };
 
+const truncateArray = (arr, limit = 5) => Array.isArray(arr) ? arr.slice(0, limit) : [];
+
 exports.getATSScore = async (resume, job) => {
   const prompt = `
-You are an ATS evaluator. Return:
+You are an ATS evaluator. Return only JSON like this:
 {
   "atsScore": 0-100,
   "improvementSuggestions": "short, helpful suggestions"
 }
+
 Job:
-- Title: ${sanitize(job.title)}
-- Description: ${sanitize(job.description)}
-- Skills: ${JSON.stringify(job.skills)}
-- Requirements: ${JSON.stringify(job.requirements)}
-- Level: ${job.experienceLevel}
+- Title: "${sanitize(job.title)}"
+- Description: "${sanitize(job.description)}"
+- Skills: ${JSON.stringify(truncateArray(job.skills))}
+- Requirements: ${JSON.stringify(truncateArray(job.requirements))}
+- Level: "${sanitize(job.experienceLevel)}"
 
 Resume:
-- Name: ${sanitize(resume.fullName)}
-- Bio: ${sanitize(resume.bio)}
-- Skills: ${JSON.stringify(resume.skills)}
-- Experience: ${JSON.stringify(resume.experiences)}
-- Projects: ${JSON.stringify(resume.projects)}
-- Education: ${JSON.stringify(resume.education)}
+- Name: "${sanitize(resume.fullName)}"
+- Bio: "${sanitize(resume.bio)}"
+- Skills: ${JSON.stringify(truncateArray(resume.skills))}
+- Experience: ${JSON.stringify(truncateArray(resume.experiences))}
+- Projects: ${JSON.stringify(truncateArray(resume.projects))}
+- Education: ${JSON.stringify(truncateArray(resume.education))}
 `;
 
-  const result = await model.generateContent(prompt);
-  return validateATS(parseJson(result.response.text()));
+  try {
+    const result = await model.generateContent(prompt);
+    return validateATS(parseJson(result.response.text()));
+  } catch (err) {
+    console.error("Error in getATSScore:", err.message);
+    throw new Error("Failed to generate ATS score.");
+  }
 };
 
 exports.generateCoverLetter = async (resume, job, profile, companyName = "Unknown Company") => {
   const prompt = `
-Write a 200–300 word professional cover letter.
+Write a 200–300 word professional cover letter in response to the job.
 
 Job:
-- Title: ${sanitize(job.title)}
-- Description: ${sanitize(job.description)}
-- Company: ${sanitize(companyName)}
+- Title: "${sanitize(job.title)}"
+- Description: "${sanitize(job.description)}"
+- Company: "${sanitize(companyName)}"
 
 Applicant:
-- Name: ${sanitize(resume.fullName)}
-- Bio: ${sanitize(resume.bio)}
-- Skills: ${JSON.stringify(resume.skills)}
-- Experience: ${JSON.stringify(resume.experiences)}
+- Name: "${sanitize(resume.fullName)}"
+- Bio: "${sanitize(resume.bio)}"
+- Skills: ${JSON.stringify(truncateArray(resume.skills))}
+- Experience: ${JSON.stringify(truncateArray(resume.experiences))}
 - Contact: ${JSON.stringify(resume.contactInformation)}
 `;
 
-  const result = await model.generateContent(prompt);
-  return result.response.text().trim();
+  try {
+    const result = await model.generateContent(prompt);
+    return result.response.text().trim();
+  } catch (err) {
+    console.error("Error in generateCoverLetter:", err.message);
+    throw new Error("Failed to generate cover letter.");
+  }
 };
 
 exports.generateResume = async (userData) => {
@@ -106,27 +130,32 @@ exports.generateResume = async (userData) => {
   } = userData;
 
   const prompt = `
-Generate a structured JSON resume with this data:
-- Name: ${sanitize(fullName)}
-- Bio: ${sanitize(bio)}
-- Location: ${sanitize(location)}
-- Contact: ${JSON.stringify(contactInformation)}
-- Social Links: ${JSON.stringify(socialLinks)}
-- Education: ${JSON.stringify(education)}
-- Experiences: ${JSON.stringify(experiences)}
-- Projects: ${JSON.stringify(projects)}
-- Skills: ${JSON.stringify(skills)}
+Generate a structured JSON resume with this data.
 
-Respond in this format:
+- Name: "${sanitize(fullName)}"
+- Bio: "${sanitize(bio)}"
+- Location: "${sanitize(location)}"
+- Contact: ${JSON.stringify(contactInformation)}
+- Social Links: ${JSON.stringify(truncateArray(socialLinks))}
+- Education: ${JSON.stringify(truncateArray(education))}
+- Experiences: ${JSON.stringify(truncateArray(experiences))}
+- Projects: ${JSON.stringify(truncateArray(projects))}
+- Skills: ${JSON.stringify(truncateArray(skills))}
+
+Respond ONLY in this format:
 {
   "resume": {
     "fullName": "...",
     ...
   }
 }
-Return only JSON, no extra text.
 `;
 
-  const result = await model.generateContent(prompt);
-  return validateResume(parseJson(result.response.text()));
+  try {
+    const result = await model.generateContent(prompt);
+    return validateResume(parseJson(result.response.text()));
+  } catch (err) {
+    console.error("Error in generateResume:", err.message);
+    throw new Error("Failed to generate resume.");
+  }
 };
