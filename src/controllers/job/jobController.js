@@ -75,10 +75,8 @@ exports.createJob = async (req, res) => {
 
     if (role === "employer") {
       const employer = await checkEmployerExists(userId);
-      if (employer.roleType === "Company Employer") {
-        employer.jobListings.push({ jobId: job._id });
-        await employer.save();
-      }
+      employer.jobListings.push({ jobId: job._id });
+      await employer.save();
     }
 
     const jobProfile = renderProfileWithFallback(job, "job", {
