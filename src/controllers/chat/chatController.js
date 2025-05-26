@@ -17,11 +17,11 @@ exports.startChat = async (req, res) => {
       throw new Error("You cannot start a chat with yourself");
     }
 
-    const user = await checkUserExists(userId);
-    const targetUser = await checkUserExists(targetUserId);
+    await checkUserExists(userId);
+    await checkUserExists(targetUserId);
 
-    const userProfile = await UserProfile.findOne({ userId }).select("fullName").lean();
-    const targetProfile = await UserProfile.findOne({ userId: targetUserId }).select("fullName").lean();
+    const userProfile = await UserProfile.findOne({ userId, isDeleted: false }).select("fullName").lean();
+    const targetProfile = await UserProfile.findOne({ userId: targetUserId, isDeleted: false }).select("fullName").lean();
 
     if (!userProfile || !targetProfile) {
       throw new Error("User profile not found");
@@ -29,7 +29,7 @@ exports.startChat = async (req, res) => {
 
     let chat = await Chat.findOne({
       "participants.userId": { $all: [userId, targetUserId] },
-    }).select("participants messages encryptionKey").lean();
+    }).select("_id").lean();
 
     if (!chat) {
       const rawEncryptionKey = generateKey();
@@ -45,13 +45,10 @@ exports.startChat = async (req, res) => {
       await chat.save();
     }
 
-    const decryptedEncryptionKey = decryptKey(chat.encryptionKey);
-    const decryptedMessages = chat.messages.map((msg) => ({
-      ...msg,
-      message: decrypt(msg.encryptedMessage, decryptedEncryptionKey),
-    }));
-
-    res.status(200).json({ chat: { ...chat, messages: decryptedMessages } });
+    res.status(200).json({
+      message: "Chat started successfully",
+      chatId: chat._id,
+    });
   } catch (error) {
     logger.error(`Error starting chat: ${error.message}`);
     res.status(error.status || 500).json({
@@ -70,7 +67,7 @@ exports.sendMessage = async (req, res) => {
       throw new Error("Message must be a non-empty string");
     }
 
-    const chat = await Chat.findOne({ _id: chatId });
+    const chat = await Chat.findOne({ _id: chatId }).select("participants messages encryptionKey");
     if (!chat) {
       throw new Error("Chat not found");
     }
@@ -106,7 +103,7 @@ exports.sendMessage = async (req, res) => {
     chat.messages[chat.messages.length - 1].status = "delivered";
     await chat.save();
 
-    const senderProfile = await UserProfile.findOne({ userId }).select("fullName").lean();
+    const senderProfile = await UserProfile.findOne({ userId, isDeleted: false }).select("fullName").lean();
     const notification = new Notification({
       userId: otherParticipant.userId,
       type: "newMessage",
@@ -120,7 +117,7 @@ exports.sendMessage = async (req, res) => {
 
     res.status(200).json({
       message: "Message sent successfully",
-      newMessage: { ...newMessage, message: message.trim() },
+      newMessage: { messageId: newMessage.messageId, message: message.trim(), sentAt: newMessage.sentAt, status: newMessage.status },
     });
   } catch (error) {
     logger.error(`Error sending message: ${error.message}`);
@@ -134,6 +131,7 @@ exports.getChatHistory = async (req, res) => {
   try {
     const { userId } = req.user;
     const { chatId } = req.params;
+    const { page = 1, limit = 20 } = req.query;
 
     const chat = await Chat.findOne({ _id: chatId })
       .select("participants messages encryptionKey")
@@ -147,12 +145,26 @@ exports.getChatHistory = async (req, res) => {
     }
 
     const decryptedEncryptionKey = decryptKey(chat.encryptionKey);
-    const decryptedMessages = chat.messages.map((msg) => ({
-      ...msg,
+    const messages = chat.messages.map((msg) => ({
+      messageId: msg.messageId,
+      senderId: msg.senderId,
       message: decrypt(msg.encryptedMessage, decryptedEncryptionKey),
+      sentAt: msg.sentAt,
+      status: msg.status,
+      readAt: msg.readAt,
     }));
 
-    res.status(200).json({ messages: decryptedMessages });
+    // Implement pagination
+    const startIndex = (page - 1) * limit;
+    const paginatedMessages = messages.slice(startIndex, startIndex + parseInt(limit));
+
+    res.status(200).json({
+      message: "Chat history retrieved successfully",
+      messages: paginatedMessages,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total: messages.length,
+    });
   } catch (error) {
     logger.error(`Error retrieving chat history: ${error.message}`);
     res.status(error.status || 500).json({
@@ -218,30 +230,58 @@ exports.markMessagesAsRead = async (req, res) => {
 exports.getUserChats = async (req, res) => {
   try {
     const { userId } = req.user;
+    const { page = 1, limit = 10 } = req.query;
 
     const chats = await Chat.find({
       "participants.userId": userId,
     })
-      .select("participants messages encryptionKey updatedAt")
+      .select("participants messages encryptionKey updatedAt") // Minimal fields
       .sort({ updatedAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
       .lean();
+
+    const totalChats = await Chat.countDocuments({ "participants.userId": userId });
 
     const enrichedChats = await Promise.all(
       chats.map(async (chat) => {
-        const decryptedEncryptionKey = decryptKey(chat.encryptionKey);
+        const otherParticipant = chat.participants.find(
+          (p) => p.userId.toString() !== userId.toString()
+        );
         const latestMessage = chat.messages[chat.messages.length - 1];
+
+        let decryptedMessage = null;
         if (latestMessage) {
-          const decryptedMessage = decrypt(latestMessage.encryptedMessage, decryptedEncryptionKey);
-          return {
-            ...chat,
-            latestMessage: { ...latestMessage, message: decryptedMessage },
-          };
+          const decryptedEncryptionKey = decryptKey(chat.encryptionKey);
+          decryptedMessage = decrypt(latestMessage.encryptedMessage, decryptedEncryptionKey);
         }
-        return chat;
+
+        return {
+          chatId: chat._id,
+          otherParticipant: {
+            userId: otherParticipant.userId,
+            name: otherParticipant.name,
+          },
+          latestMessage: latestMessage
+            ? {
+                messageId: latestMessage.messageId,
+                message: decryptedMessage,
+                sentAt: latestMessage.sentAt,
+                status: latestMessage.status,
+              }
+            : null,
+          updatedAt: chat.updatedAt,
+        };
       })
     );
 
-    res.status(200).json({ chats: enrichedChats });
+    res.status(200).json({
+      message: "User chats retrieved successfully",
+      chats: enrichedChats,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total: totalChats,
+    });
   } catch (error) {
     logger.error(`Error retrieving user chats: ${error.message}`);
     res.status(error.status || 500).json({
@@ -372,7 +412,7 @@ exports.editMessage = async (req, res) => {
     emitMessage(otherParticipant.userId.toString(), {
       chatId,
       messageId,
-      newMessage: { encryptedMessage: encryptedNewMessage, sentAt: new Date() },
+      newMessage: { message: newMessage.trim(), sentAt: new Date() },
       action: "messageEdited",
     });
 
