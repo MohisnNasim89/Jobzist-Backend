@@ -25,6 +25,8 @@ router.get("/:userId/saved", verifyToken, jobValidation.validateUserId, jobJobSe
 
 router.get("/:userId/applied", verifyToken, jobValidation.validateUserId, jobJobSeekerController.getAppliedJobs);
 
+router.get("/:jobId/applicants", verifyToken, jobValidation.validateJobId, jobController.getJobApplicants);
+
 router.post("/:jobId/hire/:jobSeekerId", verifyToken, jobValidation.validateHireCandidate, jobController.hireCandidate);
 
 router.get("/company/:companyId", jobValidation.validateGetCompanyJobs, jobPublicController.getCompanyJobs);

@@ -12,7 +12,7 @@ exports.createUserProfile = async (req, res) => {
     const authenticatedUserId = req.user.userId;
 
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only create a profile for yourself");
-    const user = await checkUserExists(userId).select("_id role");
+    const user = await checkUserExists(userId);
 
     let userProfile = await UserProfile.findOne({ userId, isDeleted: false })
       .select("userId isDeleted")
@@ -128,12 +128,12 @@ exports.updateUserProfile = async (req, res) => {
     const authenticatedUserId = req.user.userId;
 
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only update your own profile");
-    const user = await checkUserExists(userId).select("_id role");
+    const user = await checkUserExists(userId);
 
     const updates = req.body;
     const role = user.role;
 
-    const userProfile = await checkUserProfileExists(userId).select("_id");
+    const userProfile = await checkUserProfileExists(userId);
 
     const allowedProfileUpdates = [
       "fullName",
@@ -233,7 +233,7 @@ exports.deleteUser = async (req, res) => {
     const authenticatedUserId = req.user.userId;
 
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only delete your own profile");
-    const user = await checkUserExists(userId).select("_id").lean();
+    const user = await checkUserExists(userId).lean();
 
     await User.findByIdAndUpdate(userId, { isDeleted: true }); // Assuming softDelete sets isDeleted
 

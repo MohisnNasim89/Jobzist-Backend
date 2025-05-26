@@ -4,35 +4,42 @@ const JobSeeker = require("../../models/user/JobSeeker");
 const logger = require("../../utils/logger");
 const { checkUserExists, checkRole } = require("../../utils/checks");
 const { generateResume: generateAIResume } = require("../../services/aiService");
+const UserProfile = require("../../models/user/UserProfile");
 
 exports.generateResume = async (req, res) => {
   try {
     const { userId, role } = req.user;
-    await checkUserExists(userId).lean();
+    await checkUserExists(userId);
     checkRole(role, ["job_seeker"]);
 
     const existing = await Resume.findOne({ userId }).lean();
     if (existing) throw new Error("Resume already exists");
 
     const jobSeeker = await JobSeeker.findOne({ userId, isDeleted: false })
-      .select("bio jobPreferences contactInformation socialLinks education experience projects skills")
+      .select("bio jobPreferences socialLinks education experience projects skills")
       .lean();
     if (!jobSeeker) throw new Error("Job seeker profile not found");
 
     const user = await User.findById(userId)
-      .select("fullName email")
+      .select("email")
       .lean();
-    if (!user) throw new Error("User profile not found");
+    const userProfile = await UserProfile.findOne({ userId, isDeleted: false })
+      .select("fullName bio location phoneNumber socialLinks")
+      .lean();
+    if (!user) throw new Error("User not found");
+    if (!userProfile) throw new Error("User profile not found");
 
     const resumeData = {
-      fullName: user.fullName || "Not provided",
-      bio: jobSeeker.bio || "Not provided",
-      location: jobSeeker.jobPreferences?.location || "Not provided",
+      fullName: userProfile.fullName || "Not provided",
+      bio: userProfile.bio || "Not provided",
+      location: userProfile.location
+        ? `${userProfile.location.city || "Not provided"}, ${userProfile.location.country || "Not provided"}`
+        : "Not provided",
       contactInformation: {
         email: user.email,
-        phone: jobSeeker.contactInformation?.phone || "Not provided"
+        phone: userProfile.phoneNumber || "Not provided",
       },
-      socialLinks: jobSeeker.socialLinks || [],
+      socialLinks: userProfile.socialLinks || [],
       education: jobSeeker.education || [],
       experiences: jobSeeker.experience || [],
       projects: jobSeeker.projects || [],
@@ -41,9 +48,10 @@ exports.generateResume = async (req, res) => {
 
     const generated = await generateAIResume(resumeData);
 
+
     const resume = new Resume({
       userId,
-      ...generated
+      ...generated,
     });
     await resume.save();
 
@@ -51,7 +59,7 @@ exports.generateResume = async (req, res) => {
   } catch (error) {
     logger.error(`Error generating resume: ${error.message}`);
     res.status(error.status || 500).json({
-      message: error.message
+      message: error.message,
     });
   }
 };
@@ -61,7 +69,7 @@ exports.uploadResume = async (req, res) => {
     const { userId, role } = req.user;
 
     // Authorization checks
-    await checkUserExists(userId).select("_id").lean();
+    await checkUserExists(userId);
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can upload resumes");
 
     let resume = await Resume.findOne({ userId, isDeleted: false })
@@ -103,7 +111,7 @@ exports.editResume = async (req, res) => {
     const { userId, role } = req.user;
     const updates = req.body;
 
-    await checkUserExists(userId).select("_id").lean();
+    await checkUserExists(userId);
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can edit resumes");
 
     let resume = await Resume.findOne({ userId, isDeleted: false })
@@ -166,7 +174,7 @@ exports.getResume = async (req, res) => {
   try {
     const { userId, role } = req.user;
 
-    await checkUserExists(userId).select("_id").lean();
+    await checkUserExists(userId);
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can view their resume");
 
     const resume = await Resume.findOne({ userId })
@@ -204,7 +212,7 @@ exports.deleteResume = async (req, res) => {
   try {
     const { userId, role } = req.user;
 
-    await checkUserExists(userId).select("_id").lean();
+    await checkUserExists(userId);
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can delete their resume");
 
     const resume = await Resume.findOne({ userId })
@@ -214,7 +222,7 @@ exports.deleteResume = async (req, res) => {
       throw new Error("No resume found to delete");
     }
 
-    await Resume.findByIdAndUpdate(resume._id, { isDeleted: true }); // Assuming softDelete sets isDeleted
+    await Resume.deleteOne(resume._id);
 
     res.status(200).json({
       message: "Resume deleted successfully",

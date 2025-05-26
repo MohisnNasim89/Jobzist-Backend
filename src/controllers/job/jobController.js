@@ -204,7 +204,7 @@ exports.deleteJob = async (req, res) => {
     }
 
     if (job.companyId) {
-      const company = await checkCompanyExists(job.companyId).select("jobListings");
+      const company = await checkCompanyExists(job.companyId);
       company.jobListings = company.jobListings.filter(
         (listing) => listing.jobId.toString() !== jobId.toString()
       );
@@ -283,8 +283,16 @@ exports.hireCandidate = async (req, res) => {
     employer.hiredCandidates.push({ jobSeekerId, jobId });
     await employer.save();
 
-    jobSeeker.status = "Hired";
     await JobSeeker.findByIdAndUpdate(jobSeekerId, { status: "Hired" });
+
+    const jobSeekerDoc = await JobSeeker.findOne({ _id: jobSeekerId });
+    const appliedJobIndex = jobSeekerDoc.appliedJobs.findIndex(
+      (appliedJob) => appliedJob.jobId.toString() === jobId.toString()
+    );
+    if (appliedJobIndex !== -1) {
+      jobSeekerDoc.appliedJobs[appliedJobIndex].status = "Hired";
+      await jobSeekerDoc.save();
+    }
 
     await job.save();
 
@@ -466,6 +474,74 @@ exports.downloadApplicantResume = async (req, res) => {
     logger.error(`Error downloading applicant resume: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving the resume download link",
+    });
+  }
+};
+
+exports.getJobApplicants = async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const { userId, role } = req.user;
+
+    checkRole(role, ["employer", "company_admin"], "Unauthorized: Only employers and company admins can view job applicants");
+
+    const job = await Job.findOne({ _id: jobId, isDeleted: false })
+      .populate({
+        path: "applicants.userId",
+        model: "JobSeeker",
+        match: { isDeleted: false }, 
+        populate: {
+          path: "userId",
+          model: "User",
+          select: "email",
+          match: { isDeleted: false }, 
+        },
+      })
+      .lean();
+
+    if (!job) {
+      throw new Error("Job not found");
+    }
+    if (role === "employer" && job.postedBy.toString() !== userId) {
+      throw new Error("Unauthorized: You can only view applicants for jobs you posted");
+    }
+
+    if (role === "company_admin") {
+      const companyAdmin = await checkCompanyAdminExists(userId);
+      if (job.companyId && companyAdmin.companyId.toString() !== job.companyId.toString()) {
+        throw new Error("Unauthorized: You can only view applicants for jobs in your company");
+      }
+    }
+
+    if (!job.applicants || job.applicants.length === 0) {
+      return res.status(200).json({
+        message: "No applicants found for this job",
+        applicants: [],
+      });
+    }
+
+    const applicants = job.applicants.map((applicant) => {
+      const user = applicant.userId?.userId; 
+      return {
+        userId: applicant.userId?._id,
+        email: user?.email || "N/A", 
+        fullName: applicant.userId?.fullName || "N/A",
+        appliedAt: applicant.appliedAt,
+        status: applicant.status,
+        coverLetter: applicant.coverLetter,
+        atsScore: applicant.atsScore,
+        resume: applicant.resume,
+      };
+    });
+
+    res.status(200).json({
+      message: "Job applicants retrieved successfully",
+      applicants,
+    });
+  } catch (error) {
+    logger.error(`Error retrieving job applicants: ${error.message}`);
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while retrieving job applicants",
     });
   }
 };

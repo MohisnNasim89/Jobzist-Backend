@@ -1,7 +1,7 @@
 const Resume = require("../../models/resume/ResumeModel");
 const Job = require("../../models/job/Job");
 const JobSeeker = require("../../models/user/JobSeeker");
-const { checkRole, checkJobExists, checkJobSeekerExists } = require("../../utils/checks");
+const { checkRole, checkJobExists, checkJobSeekerExists, renderProfileWithFallback } = require("../../utils/checks");
 const { getATSScore, generateCoverLetter } = require("../../services/aiService");
 const logger = require("../../utils/logger");
 
@@ -13,7 +13,7 @@ exports.getATSScoreAndSuggestions = async (req, res) => {
     checkRole(role, ["job_seeker"]);
     const job = await checkJobExists(jobId).lean();
     const resume = await Resume.findOne({ userId }).lean();
-    const jobSeeker = await checkJobSeekerExists(userId).select("pendingApplications");
+    const jobSeeker = await checkJobSeekerExists(userId);
 
     if (!resume) throw new Error("Resume not found");
 
@@ -44,7 +44,7 @@ exports.generateCoverLetterForJob = async (req, res) => {
     checkRole(role, ["job_seeker"]);
     const job = await checkJobExists(jobId).lean();
     const resume = await Resume.findOne({ userId }).select("fullName contactInformation").lean();
-    const jobSeeker = await checkJobSeekerExists(userId).select("pendingApplications");
+    const jobSeeker = await checkJobSeekerExists(userId);
 
     if (!resume) throw new Error("Resume not found");
 
@@ -54,7 +54,7 @@ exports.generateCoverLetterForJob = async (req, res) => {
 
     const idx = jobSeeker.pendingApplications.findIndex((a) => a.jobId.toString() === jobId);
     if (idx !== -1) {
-      Object.assign(jobSeeker.pendingApplications[idx], { coverLetter });
+      jobSeeker.pendingApplications[idx].coverLetter = coverLetter;
     } else {
       jobSeeker.pendingApplications.push({ jobId, coverLetter });
     }
@@ -76,14 +76,14 @@ exports.applyForJob = async (req, res) => {
 
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can apply for jobs");
 
-    const job = await checkJobExists(jobId).select("status applicationDeadline applicants").lean();
+    const job = await checkJobExists(jobId);
     if (!job) {
       const error = new Error("Job not found");
       error.status = 404;
       throw error;
     }
 
-    const jobSeeker = await checkJobSeekerExists(userId).select("pendingApplications appliedJobs");
+    const jobSeeker = await checkJobSeekerExists(userId);
     if (!jobSeeker) {
       const error = new Error("Job seeker profile not found");
       error.status = 404;
@@ -140,6 +140,7 @@ exports.applyForJob = async (req, res) => {
 
       job.applicants.push({
         userId,
+        resume,
         appliedAt: new Date(),
         status: "Applied",
         coverLetter,
@@ -150,6 +151,7 @@ exports.applyForJob = async (req, res) => {
         appliedAt: new Date(),
         coverLetter,
         atsScore,
+        status: "Applied",
       });
 
       jobSeeker.pendingApplications = jobSeeker.pendingApplications.filter(
@@ -183,40 +185,42 @@ exports.saveJob = async (req, res) => {
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can save jobs");
 
     const jobQuery = checkJobExists(jobId);
-    const job = await jobQuery.select("savedBy").lean();
+    const job = await jobQuery.select("savedBy");
     if (!job) {
       const error = new Error("Job not found");
       error.status = 404;
       throw error;
     }
 
-    const jobSeeker = await checkJobSeekerExists(userId).select("savedJobs");
+    const jobSeeker = await checkJobSeekerExists(userId);
     if (!jobSeeker) {
       const error = new Error("Job seeker profile not found");
       error.status = 404;
       throw error;
     }
 
-    const existingSavedJobIndex = jobSeeker.savedJobs.findIndex(
+    const isSavedInJobSeeker = jobSeeker.savedJobs.some(
       (savedJob) => savedJob.jobId.toString() === jobId.toString()
     );
-    const existingSavedByIndex = job.savedBy.findIndex(
+    const isSavedInJob = job.savedBy.some(
       (saved) => saved.jobSeekerId.toString() === userId.toString()
     );
 
     let message;
-    if (existingSavedJobIndex !== -1 && existingSavedByIndex !== -1) {
-      jobSeeker.savedJobs.splice(existingSavedJobIndex, 1);
-      job.savedBy.splice(existingSavedByIndex, 1);
+    if (isSavedInJobSeeker || isSavedInJob) {
+      // Unsave: Remove the job from both arrays
+      jobSeeker.savedJobs = jobSeeker.savedJobs.filter(
+        (savedJob) => savedJob.jobId.toString() !== jobId.toString()
+      );
+      job.savedBy = job.savedBy.filter(
+        (saved) => saved.jobSeekerId.toString() !== userId.toString()
+      );
       message = "Job unsaved successfully";
-    } else if (existingSavedJobIndex === -1 && existingSavedByIndex === -1) {
+    } else {
+      // Save: Add the job to both arrays
       jobSeeker.savedJobs.push({ jobId, savedAt: new Date() });
       job.savedBy.push({ jobSeekerId: userId, savedAt: new Date() });
       message = "Job saved successfully";
-    } else {
-      const error = new Error("Saved job state is inconsistent. Please contact support.");
-      error.status = 500;
-      throw error;
     }
 
     await jobSeeker.save();

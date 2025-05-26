@@ -43,7 +43,6 @@ const resumeSchema = new mongoose.Schema(
     experiences: [
       {
         company: { type: String, required: true },
-        position: { type: String, required: true },
         startDate: { type: Date, required: true },
         endDate: { type: Date },
         description: { type: String, default: "" },
@@ -54,8 +53,6 @@ const resumeSchema = new mongoose.Schema(
         title: { type: String, required: true },
         description: { type: String, required: true },
         technologies: [{ type: String }],
-        startDate: { type: Date, required: true },
-        endDate: { type: Date },
         link: { type: String, default: "" },
       },
     ],

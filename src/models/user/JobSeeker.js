@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const { applySoftDelete } = require("../../utils/softDelete");
+const coverLetterAi = require("../schemas/CoverLetterAi");
 
 const educationSchema = new mongoose.Schema({
   degree: { type: String, required: true },
@@ -26,8 +27,9 @@ const jobPreferencesSchema = new mongoose.Schema({
 const appliedJobSchema = new mongoose.Schema({
   jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true },
   appliedAt: { type: Date, default: Date.now },
-  coverLetter: { type: String, required: true }, 
+  coverLetter: { type: coverLetterAi, required: true },
   atsScore: { type: Number, default: null },
+  status: { type: String, enum: ["Applied", "Under Review", "Interview", "Hired", "Rejected"], default: "Applied" },
 });
 
 const savedJobSchema = new mongoose.Schema({
@@ -46,7 +48,7 @@ const pendingApplicationSchema = new mongoose.Schema({
   jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job", required: true },
   atsScore: { type: Number, default: null },
   improvementSuggestions: { type: String, default: null },
-  coverLetter: { type: String, default: null },
+  coverLetter: { type: coverLetterAi, required: true },
   updatedAt: { type: Date, default: Date.now },
 });
 

@@ -1,0 +1,4 @@
+add fullname in users.js
+
+add a new feature that give the jobseeker the choice to get hired or not.
+when the employer or company want agrees to hire that candidate then there would be the choice for jobseeker to get hired or not for that company the jobseeker can select from all the jobs for which he want to go with 

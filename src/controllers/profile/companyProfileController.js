@@ -14,7 +14,7 @@ exports.createCompany = async (req, res) => {
     const { userId, role } = req.user;
 
     checkRole(role, ["company_admin"], "Only company admins can create companies");
-    const companyAdmin = await checkCompanyAdminExists(userId).select("_id companyId");
+    const companyAdmin = await checkCompanyAdminExists(userId);
 
     if (companyAdmin.companyId) {
       throw new Error("Unauthorized: CompanyAdmin already associated with a company");
@@ -106,10 +106,10 @@ exports.updateCompanyProfile = async (req, res) => {
     const updates = req.body;
     const { userId, role } = req.user;
 
-    const company = await checkCompanyExists(companyId).select("_id");
+    const company = await checkCompanyExists(companyId);
     checkRole(role, ["company_admin"], "Unauthorized: Only company admins can update company profiles");
 
-    const companyAdmin = await checkCompanyAdminExists(userId).select("companyId");
+    const companyAdmin = await checkCompanyAdminExists(userId);
     if (companyAdmin.companyId.toString() !== companyId.toString()) {
       throw new Error("Unauthorized: You are not an admin of this company");
     }
@@ -168,10 +168,10 @@ exports.deleteCompany = async (req, res) => {
     const { companyId } = req.params;
     const { userId, role } = req.user;
 
-    const company = await checkCompanyExists(companyId).select("_id");
+    const company = await checkCompanyExists(companyId);
     checkRole(role, ["company_admin"], "Unauthorized: Only company admins can delete companies");
 
-    const companyAdmin = await checkCompanyAdminExists(userId).select("companyId");
+    const companyAdmin = await checkCompanyAdminExists(userId);
     if (companyAdmin.companyId.toString() !== companyId.toString()) {
       throw new Error("Unauthorized: You are not an admin of this company");
     }
