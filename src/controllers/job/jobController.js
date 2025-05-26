@@ -4,7 +4,9 @@ const JobSeeker = require("../../models/user/JobSeeker");
 const UserProfile = require("../../models/user/UserProfile");
 const Notification = require("../../models/notification/Notification");
 const Resume = require("../../models/resume/ResumeModel");
+const Employer = require("../../models/user/Employer"); // Assuming this exists
 const logger = require("../../utils/logger");
+const { emitNotification } = require("../../socket/socket");
 
 const {
   checkUserExists,
@@ -15,7 +17,6 @@ const {
   checkCompanyAdminExists,
   renderProfileWithFallback,
 } = require("../../utils/checks");
-const { emitNotification } = require("../../socket/socket");
 
 exports.createJob = async (req, res) => {
   try {
@@ -229,6 +230,10 @@ exports.deleteJob = async (req, res) => {
       { "savedJobs.jobId": jobId },
       { $pull: { savedJobs: { jobId } } }
     );
+    await JobSeeker.updateMany(
+      { "jobOffers.jobId": jobId },
+      { $pull: { jobOffers: { jobId } } }
+    );
 
     await Job.findById(jobId).then(job => job.softDelete());
 
@@ -253,9 +258,8 @@ exports.hireCandidate = async (req, res) => {
       throw new Error("Unauthorized: You can only hire for jobs you posted");
     }
 
-    const jobSeeker = await JobSeeker.findOne({ _id: jobSeekerId, isDeleted: false })
-      .select("userId status")
-      .lean();
+    const jobSeeker = await JobSeeker.findOne({ userId: jobSeekerId, isDeleted: false });
+    console.log("Job Seeker:", jobSeeker);
     if (!jobSeeker) {
       throw new Error("Job seeker not found");
     }
@@ -277,39 +281,45 @@ exports.hireCandidate = async (req, res) => {
       throw new Error("This candidate has already been hired");
     }
 
-    applicant.status = "Hired";
-    job.hiredCandidates.push({ jobSeekerId });
+    const alreadyOffered = jobSeeker.jobOffers.some(
+      (offer) => offer.jobId.toString() === jobId.toString() && offer.status === "Pending"
+    );
+    if (alreadyOffered) {
+      throw new Error("This candidate has already been offered this job");
+    }
 
-    employer.hiredCandidates.push({ jobSeekerId, jobId });
-    await employer.save();
+    // Set applicant status to "Offered" instead of "Hired"
+    applicant.status = "Offered";
 
-    await JobSeeker.findByIdAndUpdate(jobSeekerId, { status: "Hired" });
-
-    const jobSeekerDoc = await JobSeeker.findOne({ _id: jobSeekerId });
-    const appliedJobIndex = jobSeekerDoc.appliedJobs.findIndex(
+    // Update JobSeeker's appliedJobs status
+    const appliedJobIndex = jobSeeker.appliedJobs.findIndex(
       (appliedJob) => appliedJob.jobId.toString() === jobId.toString()
     );
     if (appliedJobIndex !== -1) {
-      jobSeekerDoc.appliedJobs[appliedJobIndex].status = "Hired";
-      await jobSeekerDoc.save();
+      jobSeeker.appliedJobs[appliedJobIndex].status = "Offered";
     }
 
-    await job.save();
+    // Add to JobSeeker's jobOffers
+    jobSeeker.jobOffers.push({ jobId });
 
+    await job.save();
+    await jobSeeker.save();
+
+    // Send notification to JobSeeker
     const notification = new Notification({
       userId: jobSeeker.userId,
-      type: "applicationUpdate",
+      type: "jobOffer",
       relatedId: job._id,
-      message: `You have been hired for the job: ${job.title}`,
+      message: `You have received a job offer for: ${job.title}`,
     });
     await notification.save();
     emitNotification(jobSeeker.userId.toString(), notification);
 
-    res.status(200).json({ message: "Candidate hired successfully" });
+    res.status(200).json({ message: "Job offer sent to candidate successfully" });
   } catch (error) {
-    logger.error(`Error hiring candidate: ${error.message}`);
+    logger.error(`Error sending job offer: ${error.message}`);
     res.status(error.status || 500).json({
-      message: error.message || "An error occurred while hiring the candidate",
+      message: error.message || "An error occurred while sending the job offer",
     });
   }
 };
@@ -405,9 +415,7 @@ exports.previewApplicantResume = async (req, res) => {
       throw new Error("This job seeker has not applied for the job");
     }
 
-    const resume = await Resume.findOne({ userId: jobSeekerId, isDeleted: false })
-      .select("userId fullName bio location contactInformation socialLinks education experiences projects skills uploadedResume")
-      .lean();
+    const resume = await Resume.findOne({ userId: jobSeekerId }).lean();
     if (!resume) {
       throw new Error("Resume not found for this job seeker");
     }

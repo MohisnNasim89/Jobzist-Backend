@@ -1,8 +1,11 @@
 const Resume = require("../../models/resume/ResumeModel");
 const Job = require("../../models/job/Job");
 const JobSeeker = require("../../models/user/JobSeeker");
+const Employer = require("../../models/user/Employer");
+const Notification = require("../../models/notification/Notification");
 const { checkRole, checkJobExists, checkJobSeekerExists, renderProfileWithFallback } = require("../../utils/checks");
 const { getATSScore, generateCoverLetter } = require("../../services/aiService");
+const { emitNotification } = require("../../socket/socket");
 const logger = require("../../utils/logger");
 
 exports.getATSScoreAndSuggestions = async (req, res) => {
@@ -140,7 +143,7 @@ exports.applyForJob = async (req, res) => {
 
       job.applicants.push({
         userId,
-        resume,
+        resume: resume.uploadedResume || resume._id.toString(), // Use uploadedResume or resume ID
         appliedAt: new Date(),
         status: "Applied",
         coverLetter,
@@ -184,8 +187,7 @@ exports.saveJob = async (req, res) => {
 
     checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can save jobs");
 
-    const jobQuery = checkJobExists(jobId);
-    const job = await jobQuery.select("savedBy");
+    const job = await checkJobExists(jobId);
     if (!job) {
       const error = new Error("Job not found");
       error.status = 404;
@@ -208,7 +210,6 @@ exports.saveJob = async (req, res) => {
 
     let message;
     if (isSavedInJobSeeker || isSavedInJob) {
-      // Unsave: Remove the job from both arrays
       jobSeeker.savedJobs = jobSeeker.savedJobs.filter(
         (savedJob) => savedJob.jobId.toString() !== jobId.toString()
       );
@@ -217,7 +218,6 @@ exports.saveJob = async (req, res) => {
       );
       message = "Job unsaved successfully";
     } else {
-      // Save: Add the job to both arrays
       jobSeeker.savedJobs.push({ jobId, savedAt: new Date() });
       job.savedBy.push({ jobSeekerId: userId, savedAt: new Date() });
       message = "Job saved successfully";
@@ -335,7 +335,7 @@ exports.getAppliedJobs = async (req, res) => {
           salary: appliedJob.jobId.salary,
           experienceLevel: appliedJob.jobId.experienceLevel,
           applicationDeadline: appliedJob.jobId.applicationDeadline,
-          status: appliedJob.jobId.status,
+          jobStatus: appliedJob.jobId.status,
           createdAt: appliedJob.jobId.createdAt,
           appliedAt: appliedJob.appliedAt,
         });
@@ -344,6 +344,7 @@ exports.getAppliedJobs = async (req, res) => {
           appliedAt: appliedJob.appliedAt,
           coverLetter: appliedJob.coverLetter,
           atsScore: appliedJob.atsScore,
+          applicationStatus: appliedJob.status,
         };
       });
 
@@ -355,6 +356,165 @@ exports.getAppliedJobs = async (req, res) => {
     logger.error(`Error in getAppliedJobs: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while retrieving applied jobs",
+    });
+  }
+};
+
+exports.getJobOffers = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { userId: authenticatedUserId, role } = req.user;
+
+    checkRole(role, ["job_seeker"], "Unauthorized: You can only view your own job offers");
+    if (userId !== authenticatedUserId) {
+      throw new Error("Unauthorized: You can only view your own job offers");
+    }
+
+    const jobSeeker = await JobSeeker.findOne({ userId, isDeleted: false })
+      .select("jobOffers userId isDeleted")
+      .populate({
+        path: "jobOffers.jobId",
+        match: { isDeleted: false },
+        populate: [
+          { path: "companyId", select: "name logo", match: { isDeleted: false } },
+          { path: "postedBy", populate: { path: "profileId", select: "fullName", match: { isDeleted: false } } },
+        ],
+      })
+      .lean();
+
+    if (!jobSeeker) {
+      throw new Error("Job seeker profile not found");
+    }
+
+    const jobOffers = jobSeeker.jobOffers
+      .filter((offer) => offer.jobId)
+      .map((offer) => {
+        const jobProfile = renderProfileWithFallback(offer.jobId, "job", {
+          _id: offer.jobId._id,
+          title: offer.jobId.title,
+          company: offer.jobId.companyId ? { _id: offer.jobId.companyId._id, name: offer.jobId.companyId.name, logo: offer.jobId.companyId.logo } : null,
+          postedBy: offer.jobId.postedBy?.profileId?.fullName || "Unknown",
+          location: offer.jobId.location,
+          jobType: offer.jobId.jobType,
+          salary: offer.jobId.salary,
+          experienceLevel: offer.jobId.experienceLevel,
+          applicationDeadline: offer.jobId.applicationDeadline,
+          jobStatus: offer.jobId.status,
+          createdAt: offer.jobId.createdAt,
+        });
+        return {
+          ...jobProfile,
+          offeredAt: offer.offeredAt,
+          offerStatus: offer.status,
+        };
+      });
+
+    res.status(200).json({
+      message: "Job offers retrieved successfully",
+      jobOffers,
+    });
+  } catch (error) {
+    logger.error(`Error in getJobOffers: ${error.message}`);
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while retrieving job offers",
+    });
+  }
+};
+
+exports.respondToJobOffer = async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const { userId, role } = req.user;
+    const { response } = req.body;
+
+    if (!["accept", "reject"].includes(response)) {
+      throw new Error("Invalid response. Must be 'accept' or 'reject'");
+    }
+
+    checkRole(role, ["job_seeker"], "Unauthorized: Only job seekers can respond to job offers");
+
+    const job = await checkJobExists(jobId);
+    const jobSeeker = await checkJobSeekerExists(userId);
+
+    const offerIndex = jobSeeker.jobOffers.findIndex(
+      (offer) => offer.jobId.toString() === jobId.toString()
+    );
+    if (offerIndex === -1) {
+      throw new Error("No job offer found for this job");
+    }
+
+    const offer = jobSeeker.jobOffers[offerIndex];
+    if (offer.status !== "Pending") {
+      throw new Error("This offer has already been responded to");
+    }
+
+    const applicantIndex = job.applicants.findIndex(
+      (applicant) => applicant.userId.toString() === userId.toString()
+    );
+    if (applicantIndex === -1) {
+      throw new Error("Applicant not found in job");
+    }
+
+    const appliedJobIndex = jobSeeker.appliedJobs.findIndex(
+      (appliedJob) => appliedJob.jobId.toString() === jobId.toString()
+    );
+    if (appliedJobIndex === -1) {
+      throw new Error("Applied job not found in job seeker's record");
+    }
+
+    // Handle the response
+    if (response === "accept") {
+      // Check if JobSeeker is already hired for another job
+      if (jobSeeker.status === "Hired") {
+        throw new Error("You are already hired for another job");
+      }
+
+      // Mark the offer as accepted
+      offer.status = "Accepted";
+      job.applicants[applicantIndex].status = "Hired";
+      jobSeeker.appliedJobs[appliedJobIndex].status = "Hired";
+      jobSeeker.status = "Hired";
+
+      // Add to hiredCandidates
+      job.hiredCandidates.push({ jobSeekerId: jobSeeker._id });
+
+      // Add to Employer's hiredCandidates
+      const employer = await Employer.findOne({ userId: job.postedBy });
+      if (!employer) {
+        throw new Error("Employer not found");
+      }
+      employer.hiredCandidates.push({ jobSeekerId: jobSeeker._id, jobId });
+      await employer.save();
+    } else {
+      // Mark the offer as rejected
+      offer.status = "Rejected";
+      job.applicants[applicantIndex].status = "Rejected";
+      jobSeeker.appliedJobs[appliedJobIndex].status = "Rejected";
+    }
+
+    await job.save();
+    await jobSeeker.save();
+
+    // Notify the employer
+    const employer = await Employer.findOne({ userId: job.postedBy });
+    if (employer) {
+      const notification = new Notification({
+        userId: employer.userId,
+        type: "applicationUpdate",
+        relatedId: job._id,
+        message: `Candidate ${response === "accept" ? "accepted" : "rejected"} your job offer for: ${job.title}`,
+      });
+      await notification.save();
+      emitNotification(employer.userId.toString(), notification);
+    }
+
+    res.status(200).json({
+      message: `Job offer ${response}ed successfully`,
+    });
+  } catch (error) {
+    logger.error(`Error in respondToJobOffer: ${error.message}`);
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while responding to the job offer",
     });
   }
 };

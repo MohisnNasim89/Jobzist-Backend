@@ -7,7 +7,7 @@ const {
 
 const router = express.Router();
 
-router.get("/search", verifyToken, searchUsersAndCompanies);
+router.get("/", verifyToken, searchUsersAndCompanies);
 router.get("/suggestions/:userId", verifyToken, getConnectionSuggestions);
 
 module.exports = router;

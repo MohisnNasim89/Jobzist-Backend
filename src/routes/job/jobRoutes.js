@@ -5,7 +5,7 @@ const jobController = require("../../controllers/job/jobController");
 const jobJobSeekerController = require("../../controllers/job/jobJobSeekerController");
 const jobPublicController = require("../../controllers/job/jobPublicController");
 const jobValidation = require("../../validations/jobValidation");
-const {aiRateLimiter} = require("../../middlewares/rateLimiter");
+const { aiRateLimiter } = require("../../middlewares/rateLimiter");
 
 router.post("/create", verifyToken, jobValidation.validateCreateJob, jobController.createJob);
 
@@ -24,6 +24,10 @@ router.post("/:jobId/save", verifyToken, jobValidation.validateJobId, jobJobSeek
 router.get("/:userId/saved", verifyToken, jobValidation.validateUserId, jobJobSeekerController.getSavedJobs);
 
 router.get("/:userId/applied", verifyToken, jobValidation.validateUserId, jobJobSeekerController.getAppliedJobs);
+
+router.get("/:userId/offers", verifyToken, jobValidation.validateUserId, jobJobSeekerController.getJobOffers);
+
+router.post("/:jobId/offer/respond", verifyToken, jobValidation.validateJobId, jobJobSeekerController.respondToJobOffer);
 
 router.get("/:jobId/applicants", verifyToken, jobValidation.validateJobId, jobController.getJobApplicants);
 

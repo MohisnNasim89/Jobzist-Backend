@@ -35,7 +35,7 @@ app.use(express.json());
 app.use(cors());
 app.use(morgan("dev"));
 app.use(helmet());
-app.use(generalRateLimiter); 
+// app.use(generalRateLimiter); 
 
 app.set("upload", upload);
 
