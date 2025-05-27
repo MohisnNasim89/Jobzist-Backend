@@ -5,7 +5,9 @@ const Employer = require("../../models/user/Employer");
 const CompanyAdmin = require("../../models/company/CompanyAdmin");
 const Company = require("../../models/company/Company");
 const logger = require("../../utils/logger");
+const Notification = require("../models/notification/Notification");
 const { checkUserExists, checkUserIdMatch, checkUserProfileExists, renderProfileWithFallback } = require("../../utils/checks");
+const { emitNotification } = require("../socket");
 
 exports.createUserProfile = async (req, res) => {
   try {
@@ -66,7 +68,23 @@ exports.createUserProfile = async (req, res) => {
             employerData.roleType = "Company Employer";
             employerData.companyId = companyId;
             employerData.companyName = company.name;
-            employerData.status = "Pending"; // Requires admin approval
+            employerData.status = "Pending";
+
+            const companyAdmins = await CompanyAdmin.find({ companyId, isDeleted: false }).select("userId");
+            const notification = new Notification({
+              userId: null, 
+              type: "employerApprovalRequest",
+              relatedId: userProfile._id,
+              message: `${fullName} has requested to join ${company.name} as a Company Employer (Pending Approval).`,
+            });
+            for (const admin of companyAdmins) {
+              const adminNotification = new Notification({
+                ...notification.toObject(),
+                userId: admin.userId,
+              });
+              await adminNotification.save();
+              emitNotification(admin.userId, adminNotification);
+            }
           } else {
             throw new Error("Invalid roleType for employer");
           }
@@ -108,7 +126,6 @@ exports.createUserProfile = async (req, res) => {
   }
 };
 
-// Remaining functions (getCurrentUser, updateUserProfile, deleteUser) remain unchanged as provided
 exports.getCurrentUser = async (req, res) => {
   try {
     const userId = req.params.userId;
