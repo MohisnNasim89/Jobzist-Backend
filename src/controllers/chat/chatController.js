@@ -144,8 +144,11 @@ exports.getChatHistory = async (req, res) => {
       throw new Error("Unauthorized: You are not a participant in this chat");
     }
 
+    const startIndex = (page - 1) * limit;
+    const paginatedMessages = chat.messages.slice(startIndex, startIndex + parseInt(limit));
+
     const decryptedEncryptionKey = decryptKey(chat.encryptionKey);
-    const messages = chat.messages.map((msg) => ({
+    const messages = paginatedMessages.map((msg) => ({
       messageId: msg.messageId,
       senderId: msg.senderId,
       message: decrypt(msg.encryptedMessage, decryptedEncryptionKey),
@@ -154,16 +157,12 @@ exports.getChatHistory = async (req, res) => {
       readAt: msg.readAt,
     }));
 
-    // Implement pagination
-    const startIndex = (page - 1) * limit;
-    const paginatedMessages = messages.slice(startIndex, startIndex + parseInt(limit));
-
     res.status(200).json({
       message: "Chat history retrieved successfully",
-      messages: paginatedMessages,
+      messages,
       page: parseInt(page),
       limit: parseInt(limit),
-      total: messages.length,
+      total: chat.messages.length,
     });
   } catch (error) {
     logger.error(`Error retrieving chat history: ${error.message}`);
@@ -235,7 +234,7 @@ exports.getUserChats = async (req, res) => {
     const chats = await Chat.find({
       "participants.userId": userId,
     })
-      .select("participants messages encryptionKey updatedAt") // Minimal fields
+      .select("participants messages encryptionKey updatedAt")
       .sort({ updatedAt: -1 })
       .skip((page - 1) * limit)
       .limit(parseInt(limit))

@@ -462,23 +462,18 @@ exports.respondToJobOffer = async (req, res) => {
       throw new Error("Applied job not found in job seeker's record");
     }
 
-    // Handle the response
     if (response === "accept") {
-      // Check if JobSeeker is already hired for another job
       if (jobSeeker.status === "Hired") {
         throw new Error("You are already hired for another job");
       }
 
-      // Mark the offer as accepted
       offer.status = "Accepted";
       job.applicants[applicantIndex].status = "Hired";
       jobSeeker.appliedJobs[appliedJobIndex].status = "Hired";
       jobSeeker.status = "Hired";
 
-      // Add to hiredCandidates
       job.hiredCandidates.push({ jobSeekerId: jobSeeker._id });
 
-      // Add to Employer's hiredCandidates
       const employer = await Employer.findOne({ userId: job.postedBy });
       if (!employer) {
         throw new Error("Employer not found");
@@ -486,7 +481,6 @@ exports.respondToJobOffer = async (req, res) => {
       employer.hiredCandidates.push({ jobSeekerId: jobSeeker._id, jobId });
       await employer.save();
     } else {
-      // Mark the offer as rejected
       offer.status = "Rejected";
       job.applicants[applicantIndex].status = "Rejected";
       jobSeeker.appliedJobs[appliedJobIndex].status = "Rejected";
@@ -495,7 +489,6 @@ exports.respondToJobOffer = async (req, res) => {
     await job.save();
     await jobSeeker.save();
 
-    // Notify the employer
     const employer = await Employer.findOne({ userId: job.postedBy });
     if (employer) {
       const notification = new Notification({

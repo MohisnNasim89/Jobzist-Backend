@@ -48,4 +48,6 @@ const companySchema = new mongoose.Schema(
 
 applySoftDelete(companySchema);
 
+companySchema.index({ "companyEmployees.userId": 1 });
+
 module.exports = mongoose.model("Company", companySchema);

@@ -1,21 +1,70 @@
 const Company = require("../../models/company/Company");
 const Job = require("../../models/job/Job");
+const Employer = require("../../models/user/Employer");
+const User = require("../../models/user/Users");
 const logger = require("../../utils/logger");
-const {
-  checkRole,
-  checkCompanyExists,
-  checkCompanyAdminExists,
-  renderProfileWithFallback,
-} = require("../../utils/checks");
+const CompanyAdmin = require("../../models/company/CompanyAdmin");
+const { checkCompanyExists, renderProfileWithFallback } = require("../../utils/checks");
 
 exports.createCompany = async (req, res) => {
   try {
-    const { name, industry, location, website, description, companySize, foundedYear, socialLinks, logo } = req.body;
-    const { userId, role } = req.user;
+    const { userId } = req.user;
+    const {
+      name,
+      industry,
+      location,
+      website,
+      description,
+      companySize,
+      foundedYear,
+      socialLinks,
+      logo,
+    } = req.body;
 
-    checkRole(role, ["company_admin"], "Only company admins can create companies");
-    const companyAdmin = await checkCompanyAdminExists(userId);
+    const requiredFields = ["name", "industry", "location", "companySize", "foundedYear"];
+    for (const field of requiredFields) {
+      if (!req.body[field]) {
+        throw new Error(`Missing required field: ${field}`);
+      }
+    }
 
+    if (!location.country || !location.city || !location.address) {
+      throw new Error("Location must include country, city, and address");
+    }
+
+    if (website) {
+      try {
+        new URL(website);
+      } catch {
+        throw new Error("Invalid website URL");
+      }
+    }
+
+    if (socialLinks && Array.isArray(socialLinks)) {
+      for (const link of socialLinks) {
+        if (!link.platform || !link.url) {
+          throw new Error("Social links must include platform and URL");
+        }
+        try {
+          new URL(link.url);
+        } catch {
+          throw new Error(`Invalid URL for social link platform ${link.platform}`);
+        }
+      }
+    }
+
+    if (logo) {
+      try {
+        new URL(logo);
+      } catch {
+        throw new Error("Invalid logo URL");
+      }
+    }
+
+    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false });
+    if (!companyAdmin) {
+      throw new Error("Company admin not found");
+    }
     if (companyAdmin.companyId) {
       throw new Error("Unauthorized: CompanyAdmin already associated with a company");
     }
@@ -31,72 +80,64 @@ exports.createCompany = async (req, res) => {
       socialLinks,
       logo,
       companyAdmin: companyAdmin._id,
+      jobListings: [],
+      companyEmployees: [],
     });
 
     await company.save();
 
-    companyAdmin.companyId = company._id;
-    await companyAdmin.save();
+    await CompanyAdmin.findByIdAndUpdate( companyAdmin._id, { companyId: company._id });
 
-    const profileData = renderProfileWithFallback(company, "company", {
-      name: company.name || "Unnamed Company",
-      industry: company.industry || "Unknown Industry",
-      location: company.location || { country: "Unknown", city: "Unknown", address: "Unknown" },
-      website: company.website || "Not provided",
-      websiteDomain: company.website ? new URL(company.website).hostname : "Not provided",
-      description: company.description || "No description available",
-      descriptionSummary: company.description
-        ? company.description.split(" ").slice(0, 10).join(" ") || "No description"
-        : "No description",
-      companySize: company.companySize || "Unknown",
-      foundedYear: company.foundedYear || "Unknown",
-      socialLinks: company.socialLinks || [],
-      logo: company.logo || "Not provided",
-      jobListings: company.jobListings || [],
+    const profileData = renderProfileWithFallback(company.toObject(), "company", {
+      name: "Unnamed Company",
+      industry: "Unknown Industry",
+      location: { country: "Unknown", city: "Unknown", address: "Unknown" },
+      website: "Not provided",
+      websiteDomain: "Not provided",
+      description: "No description available",
+      descriptionSummary: "No description",
+      companySize: "Unknown",
+      foundedYear: "Unknown",
+      socialLinks: [],
+      logo: "Not provided",
+      jobListings: [],
     });
 
     return res.status(201).json({
       message: "Company created successfully",
-      company: { ...company.toObject(), profile: profileData },
+      company: { companyId: company._id, profile: profileData },
     });
   } catch (error) {
     logger.error(`Error creating company: ${error.message}`);
-    res.status(error.status || 500).json({
-      message: error.message || "An error occurred while creating the company",
-    });
+    res.status(error.status || 500).json({ message: error.message });
   }
 };
 
 exports.getCompanyProfile = async (req, res) => {
   try {
     const { companyId } = req.params;
-    const company = await checkCompanyExists(companyId)
-      .select("name industry location website description companySize foundedYear socialLinks logo jobListings")
-      .lean();
+
+    const company = await checkCompanyExists(companyId);
 
     const profileData = renderProfileWithFallback(company, "company", {
-      name: company.name || "Unnamed Company",
-      industry: company.industry || "Unknown Industry",
-      location: company.location || { country: "Unknown", city: "Unknown", address: "Unknown" },
-      website: company.website || "Not provided",
-      websiteDomain: company.website ? new URL(company.website).hostname : "Not provided",
-      description: company.description || "No description available",
-      descriptionSummary: company.description
-        ? company.description.split(" ").slice(0, 10).join(" ") || "No description"
-        : "No description",
-      companySize: company.companySize || "Unknown",
-      foundedYear: company.foundedYear || "Unknown",
-      socialLinks: company.socialLinks || [],
-      logo: company.logo || "Not provided",
-      jobListings: company.jobListings || [],
+      name: "Unnamed Company",
+      industry: "Unknown Industry",
+      location: { country: "Unknown", city: "Unknown", address: "Unknown" },
+      website: "Not provided",
+      websiteDomain: "Not provided",
+      description: "No description available",
+      descriptionSummary: "No description",
+      companySize: "Unknown",
+      foundedYear: "Unknown",
+      socialLinks: [],
+      logo: "Not provided",
+      jobListings: [],
     });
 
-    return res.status(200).json({ profile: profileData });
+    return res.status(200).json({ message: "Company profile retrieved successfully", profile: profileData });
   } catch (error) {
     logger.error(`Error retrieving company profile: ${error.message}`);
-    res.status(error.status || 500).json({
-      message: error.message || "An error occurred while retrieving the company profile",
-    });
+    res.status(error.status || 500).json({ message: error.message });
   }
 };
 
@@ -104,14 +145,40 @@ exports.updateCompanyProfile = async (req, res) => {
   try {
     const { companyId } = req.params;
     const updates = req.body;
-    const { userId, role } = req.user;
 
     const company = await checkCompanyExists(companyId);
-    checkRole(role, ["company_admin"], "Unauthorized: Only company admins can update company profiles");
 
-    const companyAdmin = await checkCompanyAdminExists(userId);
-    if (companyAdmin.companyId.toString() !== companyId.toString()) {
-      throw new Error("Unauthorized: You are not an admin of this company");
+    // Validate updates
+    if (updates.location) {
+      if (!updates.location.country || !updates.location.city || !updates.location.address) {
+        throw new Error("Location must include country, city, and address");
+      }
+    }
+    if (updates.website) {
+      try {
+        new URL(updates.website);
+      } catch {
+        throw new Error("Invalid website URL");
+      }
+    }
+    if (updates.socialLinks && Array.isArray(updates.socialLinks)) {
+      for (const link of updates.socialLinks) {
+        if (!link.platform || !link.url) {
+          throw new Error("Social links must include platform and URL");
+        }
+        try {
+          new URL(link.url);
+        } catch {
+          throw new Error(`Invalid URL for social link platform ${link.platform}`);
+        }
+      }
+    }
+    if (updates.logo) {
+      try {
+        new URL(updates.logo);
+      } catch {
+        throw new Error("Invalid logo URL");
+      }
     }
 
     const allowedUpdates = [
@@ -134,21 +201,19 @@ exports.updateCompanyProfile = async (req, res) => {
 
     await company.save();
 
-    const profileData = renderProfileWithFallback(company, "company", {
-      name: company.name || "Unnamed Company",
-      industry: company.industry || "Unknown Industry",
-      location: company.location || { country: "Unknown", city: "Unknown", address: "Unknown" },
-      website: company.website || "Not provided",
-      websiteDomain: company.website ? new URL(company.website).hostname : "Not provided",
-      description: company.description || "No description available",
-      descriptionSummary: company.description
-        ? company.description.split(" ").slice(0, 10).join(" ") || "No description"
-        : "No description",
-      companySize: company.companySize || "Unknown",
-      foundedYear: company.foundedYear || "Unknown",
-      socialLinks: company.socialLinks || [],
-      logo: company.logo || "Not provided",
-      jobListings: company.jobListings || [],
+    const profileData = renderProfileWithFallback(company.toObject(), "company", {
+      name: "Unnamed Company",
+      industry: "Unknown Industry",
+      location: { country: "Unknown", city: "Unknown", address: "Unknown" },
+      website: "Not provided",
+      websiteDomain: "Not provided",
+      description: "No description available",
+      descriptionSummary: "No description",
+      companySize: "Unknown",
+      foundedYear: "Unknown",
+      socialLinks: [],
+      logo: "Not provided",
+      jobListings: [],
     });
 
     return res.status(200).json({
@@ -157,37 +222,44 @@ exports.updateCompanyProfile = async (req, res) => {
     });
   } catch (error) {
     logger.error(`Error updating company profile: ${error.message}`);
-    res.status(error.status || 500).json({
-      message: error.message || "An error occurred while updating the company profile",
-    });
+    res.status(error.status || 500).json({ message: error.message });
   }
 };
 
 exports.deleteCompany = async (req, res) => {
   try {
     const { companyId } = req.params;
-    const { userId, role } = req.user;
 
     const company = await checkCompanyExists(companyId);
-    checkRole(role, ["company_admin"], "Unauthorized: Only company admins can delete companies");
 
-    const companyAdmin = await checkCompanyAdminExists(userId);
-    if (companyAdmin.companyId.toString() !== companyId.toString()) {
-      throw new Error("Unauthorized: You are not an admin of this company");
-    }
-
+    // Soft-delete related jobs
     await Job.updateMany({ companyId: companyId }, { $set: { isDeleted: true, deletedAt: new Date() } });
 
-    await Company.findByIdAndUpdate(companyId, { isDeleted: true }); // Assuming softDelete sets isDeleted
+    // Update Employers associated with the company
+    await Employer.updateMany(
+      { companyId: companyId },
+      { $set: { status: "Inactive", companyId: null, companyName: null } }
+    );
 
-    companyAdmin.companyId = null;
-    await companyAdmin.save();
+    // Update Users in companyEmployees (reset role to job_seeker)
+    const userIds = company.companyEmployees.map((emp) => emp.userId);
+    await User.updateMany(
+      { _id: { $in: userIds }, role: "employer" },
+      { $set: { role: "job_seeker" } }
+    );
+
+    // Soft-delete the company
+    await company.softDelete();
+
+    // Unlink CompanyAdmin
+    await CompanyAdmin.findOneAndUpdate(
+      { companyId: companyId, isDeleted: false },
+      { $set: { companyId: null } }
+    );
 
     return res.status(200).json({ message: "Company soft deleted successfully" });
   } catch (error) {
     logger.error(`Error deleting company: ${error.message}`);
-    res.status(error.status || 500).json({
-      message: error.message || "An error occurred while deleting the company",
-    });
+    res.status(error.status || 500).json({ message: error.message });
   }
 };

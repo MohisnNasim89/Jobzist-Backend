@@ -68,5 +68,6 @@ chatSchema.pre("save", function (next) {
 });
 
 chatSchema.index({ "participants.userId": 1 });
+chatSchema.index({ "messages.sentAt": -1 });
 
 module.exports = mongoose.model("Chat", chatSchema);

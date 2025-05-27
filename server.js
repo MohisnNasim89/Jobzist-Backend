@@ -13,7 +13,7 @@ const {generalRateLimiter} = require("./src/middlewares/rateLimiter");
 // Routes
 const authRoutes = require("./src/routes/authRoutes");
 const userProfileRoutes = require("./src/routes/profile/userProfileRoutes");
-const companyRoutes = require("./src/routes/profile/companyProfileRoutes");
+const companyProfileRoutes = require("./src/routes/profile/companyProfileRoutes");
 const uploadRoutes = require("./src/routes/uploadRoutes");
 const jobRoutes = require("./src/routes/job/jobRoutes");
 const postRoutes = require("./src/routes/post/postRoutes");
@@ -42,7 +42,7 @@ app.set("upload", upload);
 // Routes
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/user", userProfileRoutes);
-app.use("/api/v1/company", companyRoutes);
+app.use("/api/v1/company", companyProfileRoutes);
 app.use("/api/v1/upload", uploadRoutes);
 app.use("/api/v1/job", jobRoutes);
 app.use("/api/v1/post", postRoutes);

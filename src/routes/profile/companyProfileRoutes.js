@@ -7,18 +7,19 @@ const {
   getCompanyProfile,
   updateCompanyProfile,
   deleteCompany,
-} = require("../../controllers/profile/companyProfileController");
-
+} = require("../../controllers/profile/companyProfileController"); 
 const {
-  companyValidationRules, 
-  companyIdValidationRules, 
-  validate
-} = require("../../validations/companyValidation");
-
+  companyValidationRules,
+  companyIdValidationRules,
+  validate,
+} = require("../../validations/companyValidation"); 
 
 router.post("/create", verifyToken, companyValidationRules, validate, createCompany);
-router.get("/:companyId/profile", companyIdValidationRules, validate, getCompanyProfile);
-router.put("/:companyId/update-profile", verifyToken, companyIdValidationRules, companyValidationRules, validate, updateCompanyProfile);
-router.delete("/:companyId/deactivate", verifyToken, companyIdValidationRules, validate, deleteCompany);
+
+router.get("/:companyId", companyIdValidationRules, validate, getCompanyProfile);
+
+router.put("/:companyId", verifyToken, companyIdValidationRules, validate, updateCompanyProfile);
+
+router.delete("/:companyId", verifyToken, companyIdValidationRules, validate, deleteCompany);
 
 module.exports = router;
