@@ -5,7 +5,7 @@ const notificationSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   type: { 
     type: String, 
-    enum: ["newPost", "newJob", "applicationUpdate", "postInteraction", "connectionRequest", "newMessage", "jobOffer"], 
+    enum: ["newPost", "newJob", "applicationUpdate", "postInteraction", "connectionRequest", "newMessage", "jobOffer", "employerApprovalRequest", "employerApproval"], 
     required: true 
   },
   relatedId: { type: mongoose.Schema.Types.ObjectId, required: true },

@@ -42,7 +42,7 @@ const employerSchema = new mongoose.Schema(
     hiredCandidates: [hiredCandidateSchema],
     status: {
       type: String,
-      enum: ["Active", "Inactive", "Fired"],
+      enum: ["Pending", "Active", "Inactive", "Fired"],
       default: "Active",
     },
   },

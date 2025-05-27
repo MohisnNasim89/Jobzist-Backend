@@ -3,6 +3,7 @@ const UserProfile = require("../../models/user/UserProfile");
 const JobSeeker = require("../../models/user/JobSeeker");
 const Employer = require("../../models/user/Employer");
 const CompanyAdmin = require("../../models/company/CompanyAdmin");
+const Company = require("../../models/company/Company");
 const logger = require("../../utils/logger");
 const { checkUserExists, checkUserIdMatch, checkUserProfileExists, renderProfileWithFallback } = require("../../utils/checks");
 
@@ -21,7 +22,7 @@ exports.createUserProfile = async (req, res) => {
       throw new Error("User profile already exists. Use the update endpoint to modify it.");
     }
 
-    const { fullName } = req.body;
+    const { fullName, roleType, companyId } = req.body;
     if (!fullName) {
       throw new Error("Full name is required to create a user profile");
     }
@@ -51,7 +52,28 @@ exports.createUserProfile = async (req, res) => {
         .select("userId isDeleted")
         .lean();
       if (!roleSpecificData) {
-        roleSpecificData = new RoleSpecificModel({ userId });
+        if (user.role === "employer") {
+          const employerData = { userId };
+          if (roleType === "Independent Recruiter") {
+            employerData.roleType = "Independent Recruiter";
+            employerData.status = "Active";
+          } else if (roleType === "Company Employer") {
+            if (!companyId) {
+              throw new Error("companyId is required for Company Employer");
+            }
+            const company = await Company.findById(companyId);
+            if (!company) throw new Error("Company not found");
+            employerData.roleType = "Company Employer";
+            employerData.companyId = companyId;
+            employerData.companyName = company.name;
+            employerData.status = "Pending"; // Requires admin approval
+          } else {
+            throw new Error("Invalid roleType for employer");
+          }
+          roleSpecificData = new RoleSpecificModel(employerData);
+        } else {
+          roleSpecificData = new RoleSpecificModel({ userId });
+        }
         await roleSpecificData.save();
         await User.findByIdAndUpdate(userId, { roleSpecificData: roleSpecificData._id });
       }
@@ -86,6 +108,7 @@ exports.createUserProfile = async (req, res) => {
   }
 };
 
+// Remaining functions (getCurrentUser, updateUserProfile, deleteUser) remain unchanged as provided
 exports.getCurrentUser = async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -235,7 +258,7 @@ exports.deleteUser = async (req, res) => {
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only delete your own profile");
     const user = await checkUserExists(userId).lean();
 
-    await User.findByIdAndUpdate(userId, { isDeleted: true }); // Assuming softDelete sets isDeleted
+    await User.findByIdAndUpdate(userId, { isDeleted: true });
 
     return res.status(200).json({ message: "User account deleted successfully" });
   } catch (error) {

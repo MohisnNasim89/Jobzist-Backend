@@ -4,7 +4,122 @@ const Job = require("../../models/job/Job");
 const logger = require("../../utils/logger");
 const Company = require("../../models/company/Company");
 const CompanyAdmin = require("../../models/company/CompanyAdmin");
-const { checkRole } = require("../../utils/checks");
+const Employer = require("../../models/user/Employer");
+const Notification = require("../models/notification/Notification");
+const { checkCompanyExists } = require("../../utils/checks");
+const { emitNotification } = require("../socket");
+
+exports.approveCompanyEmployer = async (req, res) => {
+  try {
+    const { userId } = req.user;
+    const { companyId, employerId } = req.params;
+
+    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false }).lean();
+    if (!companyAdmin || companyAdmin.companyId.toString() !== companyId) {
+      throw new Error("Unauthorized: You can only approve employers for your own company");
+    }
+
+    const company = await checkCompanyExists(companyId);
+
+    const employer = await Employer.findById(employerId);
+    if (!employer) throw new Error("Employer not found");
+    if (employer.roleType !== "Company Employer") throw new Error("This endpoint is only for approving Company Employers");
+    if (employer.status !== "Pending") throw new Error("Employer is not in a pending state");
+    if (employer.companyId.toString() !== companyId) throw new Error("Employer is not associated with this company");
+
+    employer.status = "Active";
+    await employer.save();
+
+    company.employees = company.employees || [];
+    if (!company.employees.some(id => id.toString() === employer.userId.toString())) {
+      company.employees.push(employer.userId);
+      await company.save();
+    }
+
+    const notification = new Notification({
+      userId: employer.userId,
+      type: "employerApproval",
+      relatedId: employer._id,
+      message: `Your request to join ${company.name} as a Company Employer has been approved.`,
+    });
+    await notification.save();
+    emitNotification(employer.userId, notification);
+
+    res.status(200).json({
+      message: "Company employer approved successfully",
+      employer: {
+        userId: employer.userId,
+        roleType: employer.roleType,
+        companyId: employer.companyId,
+        companyName: employer.companyName,
+        status: employer.status,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error approving company employer: ${error.message}`);
+    res.status(error.status || 500).json({ message: error.message });
+  }
+};
+
+exports.getCompanyEmployerApprovalRequests = async (req, res) => {
+  try {
+    const { userId } = req.user;
+    const { page = 1, limit = 10 } = req.query;
+
+    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false })
+      .select("companyId")
+      .lean();
+    if (!companyAdmin) {
+      throw new Error("Company admin not found");
+    }
+
+    const approvalRequests = await Employer.find({
+      companyId: companyAdmin.companyId,
+      roleType: "Company Employer",
+      status: "Pending",
+      isDeleted: false,
+    })
+      .select("userId companyId companyName status createdAt")
+      .populate({
+        path: "userId",
+        select: "email",
+        match: { isDeleted: false },
+      })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      .lean();
+
+    const totalRequests = await Employer.countDocuments({
+      companyId: companyAdmin.companyId,
+      roleType: "Company Employer",
+      status: "Pending",
+      isDeleted: false,
+    });
+
+    const filteredRequests = approvalRequests.filter(request => request.userId);
+
+    res.status(200).json({
+      message: "Company employer approval requests retrieved successfully",
+      approvalRequests: filteredRequests.map(request => ({
+        employerId: request._id,
+        userId: request.userId._id,
+        email: request.userId.email,
+        companyId: request.companyId,
+        companyName: request.companyName,
+        status: request.status,
+        createdAt: request.createdAt,
+      })),
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total: totalRequests,
+    });
+  } catch (error) {
+    logger.error(`Error retrieving company employer approval requests: ${error.message}`);
+    res.status(error.status || 500).json({
+      message: error.message,
+    });
+  }
+};
 
 exports.getCompanyUsers = async (req, res) => {
   try {
@@ -87,6 +202,17 @@ exports.assignCompanyUserRole = async (req, res) => {
     targetUser.role = newRole;
     await targetUser.save();
 
+    // Notify the target user of the role change
+    const companyName = (await Company.findById(companyAdmin.companyId).select("name")).name;
+    const notification = new Notification({
+      userId: targetUserId,
+      type: "employerApproval",
+      relatedId: targetUser._id,
+      message: `Your role at ${companyName} has been updated to ${newRole}.`,
+    });
+    await notification.save();
+    emitNotification(targetUserId, notification);
+
     res.status(200).json({
       message: "Company user role assigned successfully",
       user: { userId: targetUserId, role: newRole },
@@ -135,8 +261,24 @@ exports.fireEmployer = async (req, res) => {
     company.employees.splice(employeeIndex, 1);
     await company.save();
 
-    targetUser.role = "job_seeker";
+    targetUser.role = "employer";
+
+    employerProfile = await Employer.findOne({ userId: targetUserId, isDeleted: false });
+    employerProfile.roleType = "Independent Recruiter";
+    employerProfile.companyId = null;
+    employerProfile.companyName = null;
+
     await targetUser.save();
+
+    const companyName = (await Company.findById(companyAdmin.companyId).select("name")).name;
+    const notification = new Notification({
+      userId: targetUserId,
+      type: "employerApproval",
+      relatedId: targetUser._id,
+      message: `You have been removed from your employer role at ${companyName}. Your role is now job_seeker.`,
+    });
+    await notification.save();
+    emitNotification(targetUserId, notification);
 
     res.status(200).json({
       message: "Employer fired successfully",
@@ -192,7 +334,7 @@ exports.createCompanyJob = async (req, res) => {
       throw new Error("Company admin not found");
     }
 
-    const company = await Company.findById(companyAdmin.companyId).select("jobListings");
+    const company = await Company.findById(companyAdmin.companyId).select("jobListings employees");
     if (!company) {
       throw new Error("Company not found");
     }
@@ -216,6 +358,21 @@ exports.createCompanyJob = async (req, res) => {
 
     company.jobListings.push(newJob._id);
     await company.save();
+
+    const notification = new Notification({
+      userId: null,
+      type: "newJob",
+      relatedId: newJob._id,
+      message: `A new job "${title}" has been posted at ${company.name}.`,
+    });
+    for (const employeeId of company.employees) {
+      const employeeNotification = new Notification({
+        ...notification.toObject(),
+        userId: employeeId,
+      });
+      await employeeNotification.save();
+      emitNotification(employeeId, employeeNotification);
+    }
 
     res.status(201).json({
       message: "Company job created successfully",
