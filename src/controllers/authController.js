@@ -7,7 +7,6 @@ const JobSeeker = require("../models/user/JobSeeker");
 const Employer = require("../models/user/Employer");
 const CompanyAdmin = require("../models/company/CompanyAdmin");
 const SuperAdmin = require("../models/user/SuperAdmin");
-const { renderProfileWithFallback } = require("../utils/checks");
 const logger = require("../utils/logger");
 require("dotenv").config();
 
@@ -29,6 +28,11 @@ const getRoleModel = (role) => {
   }
 };
 
+const sanitizeInput = (input) => {
+  if (typeof input !== "string") return "";
+  return input.replace(/[<>&'"]/g, "").trim().substring(0, 255);
+};
+
 exports.register = async (req, res) => {
   try {
     const { email, password, role, fullName } = req.body;
@@ -36,33 +40,38 @@ exports.register = async (req, res) => {
       return res.status(400).json({ message: "All fields are required" });
     }
 
+    const sanitizedEmail = sanitizeInput(email);
+    const sanitizedPassword = sanitizeInput(password);
+    const sanitizedRole = sanitizeInput(role);
+    const sanitizedFullName = sanitizeInput(fullName);
+
     const validRoles = ["job_seeker", "employer", "company_admin", "super_admin"];
-    if (!validRoles.includes(role)) {
+    if (!validRoles.includes(sanitizedRole)) {
       return res.status(400).json({ message: "Invalid role" });
     }
 
-    const existingUser = await User.findOne({ email }).lean(); // lean: not modifying user object
+    const existingUser = await User.findOne({ email: sanitizedEmail }).lean();
     if (existingUser) {
       return res.status(400).json({ message: "User already exists" });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(sanitizedPassword, 10);
 
-    const userRecord = await admin.auth().createUser({ email, password });
-    const newUser = new User({ authId: userRecord.uid, email, role, password: hashedPassword });
+    const userRecord = await admin.auth().createUser({ email: sanitizedEmail, password: sanitizedPassword });
+    const newUser = new User({ authId: userRecord.uid, email: sanitizedEmail, role: sanitizedRole, password: hashedPassword });
     await newUser.save();
 
-    const userProfile = new UserProfile({ userId: newUser._id, fullName });
+    const userProfile = new UserProfile({ userId: newUser._id, fullName: sanitizedFullName });
     await userProfile.save();
 
     newUser.profileId = userProfile._id;
     await newUser.save();
 
-    const RoleModel = getRoleModel(role);
+    const RoleModel = getRoleModel(sanitizedRole);
     const roleData = new RoleModel({ userId: newUser._id });
     await roleData.save();
 
-    const emailVerificationLink = await admin.auth().generateEmailVerificationLink(email);
+    const emailVerificationLink = await admin.auth().generateEmailVerificationLink(sanitizedEmail);
 
     res.status(200).json({
       message: "Verification email sent",
@@ -71,7 +80,7 @@ exports.register = async (req, res) => {
   } catch (error) {
     logger.error(`Registration Error: ${error.message}`);
     res.status(500).json({
-      message: error.message || "An error occurred during registration",
+      message: "An error occurred during registration",
     });
   }
 };
@@ -83,9 +92,12 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: "Email and password are required" });
     }
 
-    const userRecord = await admin.auth().getUserByEmail(email);
+    const sanitizedEmail = sanitizeInput(email);
+    const sanitizedPassword = sanitizeInput(password);
+
+    const userRecord = await admin.auth().getUserByEmail(sanitizedEmail);
     if (!userRecord) {
-      return res.status(404).json({ message: "User not found in Firebase" });
+      return res.status(404).json({ message: "User not found" });
     }
 
     if (!userRecord.emailVerified) {
@@ -95,41 +107,30 @@ exports.login = async (req, res) => {
     const role = userRecord.customClaims?.role || "job_seeker";
     const RoleModel = getRoleModel(role);
 
-    const user = await User.findOne({ email, isDeleted: false })
+    const user = await User.findOne({ email: sanitizedEmail, isDeleted: false })
       .select("+password")
-      .populate("profileId")
-      .populate({
-        path: "roleSpecificData",
-        model: RoleModel,
-      });
+      .lean();
 
     if (!user) {
       return res.status(404).json({ message: "User not found in DB" });
     }
 
-    const isPasswordValid = await bcrypt.compare(password, user.password);
+    const isPasswordValid = await bcrypt.compare(sanitizedPassword, user.password);
     if (!isPasswordValid) {
       return res.status(401).json({ message: "Invalid password" });
     }
 
     const token = generateToken(user._id.toString(), user.role);
-    const profileData = renderProfileWithFallback(user, "user", {
-      authId: user.authId,
-      email: user.email,
-      role: user.role,
-      profile: user.profileId || {},
-      roleSpecificData: user.roleSpecificData || {},
-    });
 
     res.status(200).json({
       message: "Login successful",
       token,
-      profile: profileData,
+      user: { userId: user._id, role: user.role },
     });
   } catch (error) {
     logger.error(`Login Error: ${error.message}`);
     res.status(500).json({
-      message: error.message || "An error occurred during login",
+      message: "An error occurred during login",
     });
   }
 };
@@ -145,16 +146,18 @@ exports.oauthLogin = async (req, res) => {
     let isNewUser = false;
     if (!user) {
       isNewUser = true;
+      const sanitizedEmail = sanitizeInput(decodedToken.email);
+      const sanitizedName = sanitizeInput(decodedToken.name || "Unknown");
       user = new User({
         authId: decodedToken.uid,
-        email: decodedToken.email,
+        email: sanitizedEmail,
         role: "job_seeker",
       });
       await user.save();
 
       const userProfile = new UserProfile({
         userId: user._id,
-        fullName: decodedToken.name || "Unknown",
+        fullName: sanitizedName,
       });
       await userProfile.save();
 
@@ -166,28 +169,20 @@ exports.oauthLogin = async (req, res) => {
     }
 
     user = await User.findOne({ authId: decodedToken.uid, isDeleted: false })
-      .populate("profileId")
-      .populate({ path: "roleSpecificData", model: JobSeeker })
+      .select("_id role")
       .lean();
 
     const token = generateToken(user._id.toString(), user.role);
-    const profileData = renderProfileWithFallback(user, "user", {
-      authId: user.authId,
-      email: user.email,
-      role: user.role,
-      profile: user.profileId || {},
-      roleSpecificData: user.roleSpecificData || {},
-    });
 
     res.status(200).json({
       message: isNewUser ? "User registered via OAuth" : "OAuth login successful",
       token,
-      profile: profileData,
+      user: { userId: user._id, role: user.role },
     });
   } catch (error) {
     logger.error(`OAuth Login Error: ${error.message}`);
     res.status(500).json({
-      message: error.message || "OAuth login failed",
+      message: "OAuth login failed",
     });
   }
 };
@@ -197,17 +192,19 @@ exports.forgotPassword = async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ message: "Email is required" });
 
-    const user = await User.findOne({ email, isDeleted: false }).lean();
+    const sanitizedEmail = sanitizeInput(email);
+
+    const user = await User.findOne({ email: sanitizedEmail, isDeleted: false }).lean();
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const resetLink = await admin.auth().generatePasswordResetLink(email);
+    const resetLink = await admin.auth().generatePasswordResetLink(sanitizedEmail);
     res.status(200).json({ message: "Password reset link sent", resetLink });
   } catch (error) {
     logger.error(`Forgot Password Error: ${error.message}`);
     res.status(500).json({
-      message: error.message || "Error sending password reset link",
+      message: "Error sending password reset link",
     });
   }
 };
@@ -220,7 +217,7 @@ exports.logout = async (req, res) => {
   } catch (error) {
     logger.error(`Logout Error: ${error.message}`);
     res.status(500).json({
-      message: error.message || "Logout failed",
+      message: "Logout failed",
     });
   }
 };

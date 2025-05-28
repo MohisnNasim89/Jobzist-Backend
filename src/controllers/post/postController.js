@@ -27,7 +27,7 @@ exports.createPost = async (req, res) => {
       userId,
       content: content || "",
       visibility: visibility || "public",
-      tags: tags ? JSON.parse(tags) : [], // Parse tags if sent as JSON string
+      tags: tags ? JSON.parse(tags) : [],
       media: [],
     });
 
@@ -36,7 +36,7 @@ exports.createPost = async (req, res) => {
         const fileType = file.mimetype.startsWith("image/") ? "image" : "video";
         return {
           type: fileType,
-          url: file.path, // Cloudinary URL
+          url: file.path,
         };
       });
     }
@@ -62,13 +62,9 @@ exports.createPost = async (req, res) => {
       }
     }
 
-    const populatedPost = await Post.findById(post._id)
-      .populate("userId", "email role")
-      .populate("tags.id", "name");
-
     return res.status(201).json({
       message: "Post created successfully",
-      post: populatedPost,
+      postId: post._id,
     });
   } catch (error) {
     logger.error(`Error creating post: ${error.message}`);
@@ -84,14 +80,31 @@ exports.getPost = async (req, res) => {
     const { userId } = req.user;
 
     const post = await checkPostExists(postId)
-      .select("visibility userId")
+      .select("userId content visibility tags media createdAt likes comments shares saves")
+      .populate("userId", "email role")
+      .populate("tags.id", "name")
       .lean();
 
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
     }
 
-    return res.status(200).json({ post });
+    return res.status(200).json({
+      message: "Post retrieved successfully",
+      post: {
+        postId: post._id,
+        userId: post.userId,
+        content: post.content,
+        visibility: post.visibility,
+        tags: post.tags,
+        media: post.media,
+        createdAt: post.createdAt,
+        likes: post.likes.length,
+        comments: post.comments,
+        shares: post.shares.length,
+        saves: post.saves.length,
+      },
+    });
   } catch (error) {
     logger.error(`Error retrieving post: ${error.message}`);
     res.status(error.status || 500).json({
@@ -104,6 +117,7 @@ exports.getUserPosts = async (req, res) => {
   try {
     const { userId } = req.params;
     const authenticatedUserId = req.user.userId;
+    const { page = 1, limit = 10 } = req.query;
 
     await checkUserExists(userId).lean();
 
@@ -112,14 +126,23 @@ exports.getUserPosts = async (req, res) => {
       query.visibility = "public";
     }
 
+    const total = await Post.countDocuments(query);
     const posts = await Post.find(query)
-      .select("userId content visibility tags media createdAt")
+      .select("userId content visibility tags media createdAt likes comments shares saves")
       .populate("userId", "email role")
       .populate("tags.id", "name")
       .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
       .lean();
 
-    return res.status(200).json({ posts });
+    return res.status(200).json({
+      message: "Posts retrieved successfully",
+      posts,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+    });
   } catch (error) {
     logger.error(`Error retrieving user posts: ${error.message}`);
     res.status(error.status || 500).json({
@@ -162,13 +185,9 @@ exports.updatePost = async (req, res) => {
 
     await Post.findByIdAndUpdate(postId, post);
 
-    const populatedPost = await Post.findById(post._id)
-      .populate("userId", "email role")
-      .populate("tags.id", "name");
-
     return res.status(200).json({
       message: "Post updated successfully",
-      post: populatedPost,
+      postId: post._id,
     });
   } catch (error) {
     logger.error(`Error updating post: ${error.message}`);
@@ -279,7 +298,12 @@ exports.commentOnPost = async (req, res) => {
 
     return res.status(200).json({
       message: "Comment added successfully",
-      comment,
+      comment: {
+        commentId: comment._id,
+        userId: comment.userId,
+        content: comment.content,
+        createdAt: comment.createdAt,
+      },
     });
   } catch (error) {
     logger.error(`Error commenting on post: ${error.message}`);
@@ -414,13 +438,9 @@ exports.togglePostVisibility = async (req, res) => {
     const newVisibility = post.visibility === "public" ? "private" : "public";
     await Post.findByIdAndUpdate(postId, { visibility: newVisibility });
 
-    const populatedPost = await Post.findById(post._id)
-      .populate("userId", "email role")
-      .populate("tags.id", "name");
-
     return res.status(200).json({
       message: `Post visibility toggled to ${newVisibility} successfully`,
-      post: populatedPost,
+      postId: post._id,
     });
   } catch (error) {
     logger.error(`Error toggling post visibility: ${error.message}`);

@@ -97,31 +97,49 @@ exports.createUserProfile = async (req, res) => {
       }
     }
 
-    const updatedUser = await User.findOne({ _id: userId, isDeleted: false })
-      .select("authId email role profileId roleSpecificData")
-      .populate({ path: "profileId", match: { isDeleted: false } })
-      .populate({ path: "roleSpecificData", match: { isDeleted: false } });
-
-    if (!updatedUser) {
-      throw new Error("User not found after profile creation");
-    }
-
-    const profileData = renderProfileWithFallback(updatedUser, "user", {
-      authId: updatedUser.authId,
-      email: updatedUser.email,
-      role: updatedUser.role,
-      profile: updatedUser.profileId || {},
-      roleSpecificData: updatedUser.roleSpecificData || {},
-    });
-
     return res.status(201).json({
       message: "User profile created successfully",
-      profile: profileData,
+      userId: userId,
     });
   } catch (error) {
     logger.error(`Error creating user profile: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while creating the user profile",
+    });
+  }
+};
+
+exports.getUsers = async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+
+    const total = await User.countDocuments({ isDeleted: false });
+    const users = await User.find({ isDeleted: false })
+      .select("_id role profileId")
+      .populate({ path: "profileId", select: "fullName location.city profilePicture", match: { isDeleted: false } })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      .lean();
+
+    const userList = users.map(user => ({
+      userId: user._id,
+      fullName: user.profileId?.fullName || "Unnamed User",
+      role: user.role || "Unknown",
+      city: user.profileId?.location?.city || "Unknown",
+      profilePicture: user.profileId?.profilePicture || "Not provided",
+    }));
+
+    return res.status(200).json({
+      message: "Users retrieved successfully",
+      users: userList,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    logger.error(`Error retrieving users: ${error.message}`);
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while retrieving users",
     });
   }
 };
@@ -152,6 +170,7 @@ exports.getCurrentUser = async (req, res) => {
     });
 
     return res.status(200).json({
+      message: "User profile retrieved successfully",
       profile: profileData,
     });
   } catch (error) {
@@ -238,26 +257,9 @@ exports.updateUserProfile = async (req, res) => {
       await RoleSpecificModel.findByIdAndUpdate(roleSpecificData._id || roleSpecificData, roleSpecificUpdates);
     }
 
-    const updatedUser = await User.findOne({ _id: userId, isDeleted: false })
-      .select("authId email role profileId roleSpecificData")
-      .populate({ path: "profileId", match: { isDeleted: false } })
-      .populate({ path: "roleSpecificData", match: { isDeleted: false } });
-
-    if (!updatedUser) {
-      throw new Error("User not found");
-    }
-
-    const profileData = renderProfileWithFallback(updatedUser, "user", {
-      authId: updatedUser.authId,
-      email: updatedUser.email,
-      role: updatedUser.role,
-      profile: updatedUser.profileId || {},
-      roleSpecificData: updatedUser.roleSpecificData || {},
-    });
-
     return res.status(200).json({
       message: "Profile updated successfully",
-      profile: profileData,
+      userId: userId,
     });
   } catch (error) {
     logger.error(`Error updating user profile: ${error.message}`);

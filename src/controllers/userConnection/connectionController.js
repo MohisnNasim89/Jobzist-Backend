@@ -1,5 +1,6 @@
 const UserProfile = require("../../models/user/UserProfile");
 const Notification = require("../../models/notification/Notification");
+const Company = require("../../models/company/Company");
 const { checkUserExists } = require("../../utils/checks");
 const { emitNotification } = require("../../socket/socket");
 const logger = require("../../utils/logger");
@@ -214,6 +215,156 @@ exports.removeConnection = async (req, res) => {
   }
 };
 
+exports.getConnections = async (req, res) => {
+  try {
+    const { userId } = req.user;
+    const { page = 1, limit = 10 } = req.query;
+
+    const userProfile = await UserProfile.findOne({ userId })
+      .select("connections")
+      .populate({
+        path: "connections",
+        select: "userId fullName location.city",
+        populate: { path: "userId", select: "email role" },
+        match: { isDeleted: false }
+      })
+      .lean();
+
+    if (!userProfile) {
+      throw new Error("User profile not found");
+    }
+
+    const total = userProfile.connections.length;
+    const paginatedConnections = userProfile.connections
+      .slice((page - 1) * limit, page * limit)
+      .map(connection => ({
+        userId: connection.userId._id,
+        fullName: connection.fullName || "Unnamed User",
+        email: connection.userId.email || "Not provided",
+        role: connection.userId.role || "Unknown",
+        city: connection.location?.city || "Unknown",
+      }));
+
+    res.status(200).json({
+      message: "Connections retrieved successfully",
+      connections: paginatedConnections,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    logger.error(`Error retrieving connections: ${error.message}`);
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while retrieving connections",
+    });
+  }
+};
+
+exports.getConnectionRequests = async (req, res) => {
+  try {
+    const { userId } = req.user;
+    const { page = 1, limit = 10, status = "pending" } = req.query;
+
+    const userProfile = await UserProfile.findOne({ userId })
+      .select("connectionRequests")
+      .lean();
+
+    if (!userProfile) {
+      throw new Error("User profile not found");
+    }
+
+    const filteredRequests = userProfile.connectionRequests.filter(
+      req => req.status === status
+    );
+
+    const total = filteredRequests.length;
+    const paginatedRequests = filteredRequests
+      .slice((page - 1) * limit, page * limit);
+
+    const populatedRequests = await Promise.all(
+      paginatedRequests.map(async (request) => {
+        const fromUserProfile = await UserProfile.findOne({ userId: request.fromUserId })
+          .select("fullName location.city")
+          .populate("userId", "email role")
+          .lean();
+        return {
+          fromUserId: request.fromUserId,
+          fullName: fromUserProfile?.fullName || "Unnamed User",
+          email: fromUserProfile?.userId?.email || "Not provided",
+          role: fromUserProfile?.userId?.role || "Unknown",
+          city: fromUserProfile?.location?.city || "Unknown",
+          status: request.status,
+        };
+      })
+    );
+
+    res.status(200).json({
+      message: "Connection requests retrieved successfully",
+      connectionRequests: populatedRequests,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    logger.error(`Error retrieving connection requests: ${error.message}`);
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while retrieving connection requests",
+    });
+  }
+};
+
+exports.getFollowedCompanies = async (req, res) => {
+  try {
+    const { userId } = req.user;
+    const { page = 1, limit = 10 } = req.query;
+
+    const userProfile = await UserProfile.findOne({ userId })
+      .select("followedCompanies")
+      .populate({
+        path: "followedCompanies",
+        select: "name industry location.city",
+        match: { isDeleted: false }
+      })
+      .lean();
+
+    if (!userProfile) {
+      throw new Error("User profile not found");
+    }
+
+    const total = userProfile.followedCompanies.length;
+    const paginatedCompanies = userProfile.followedCompanies
+      .slice((page - 1) * limit, page * limit)
+      .map(company => ({
+        companyId: company._id,
+        name: company.name || "Unnamed Company",
+        industry: company.industry || "Unknown",
+        city: company.location?.city || "Unknown",
+      }));
+
+    res.status(200).json({
+      message: "Followed companies retrieved successfully",
+      companies: paginatedCompanies,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    logger.error(`Error retrieving followed companies: ${error.message}`);
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while retrieving followed companies",
+    });
+  }
+};
+
 exports.followCompany = async (req, res) => {
   try {
     const { userId } = req.user;
@@ -224,6 +375,11 @@ exports.followCompany = async (req, res) => {
       .lean();
     if (!userProfile) {
       throw new Error("User profile not found");
+    }
+
+    const company = await Company.findById(companyId).lean();
+    if (!company) {
+      throw new Error("Company not found");
     }
 
     if (userProfile.followedCompanies.includes(companyId)) {

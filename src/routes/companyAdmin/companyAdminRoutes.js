@@ -1,31 +1,36 @@
 const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
-const rateLimit = require("express-rate-limit");
 const checkCompanyAdminPermissions = require("../../middlewares/checkCompanyAdminPermissions");
 const companyAdminController = require("../../controllers/companyAdmin/companyAdminController");
 const companyUtil = require("../../utils/companies");
 
 router.get("/", companyUtil.getCompanies);
 
-router.get("/:companyId/employer-requests", verifyToken, companyAdminLimiter, checkCompanyAdminPermissions("Manage Company Users"), companyAdminController.getCompanyEmployerApprovalRequests);
+router.get("/:companyId/employer-requests", verifyToken, checkCompanyAdminPermissions("Manage Company Users"), companyAdminController.getCompanyEmployerApprovalRequests);
+
+router.get("/:companyId/employers/:employerId/approval", verifyToken, checkCompanyAdminPermissions("Manage Company Users"), companyAdminController.getCompanyEmployerApproval);
 
 router.put("/:companyId/employers/:employerId/approve", verifyToken, checkCompanyAdminPermissions("Manage Company Users"), companyAdminController.approveCompanyEmployer);
 
-router.get("/users", verifyToken, checkCompanyAdminPermissions("Manage Company Users"), companyAdminController.getCompanyUsers);
+router.get("/:companyId/users", verifyToken, checkCompanyAdminPermissions("Manage Company Users"), companyAdminController.getCompanyUsers);
 
-router.put("/assign-role", verifyToken, checkCompanyAdminPermissions("Manage Company Users"), companyAdminController.assignCompanyUserRole);
+router.get("/:companyId/users/:targetUserId", verifyToken, checkCompanyAdminPermissions("Manage Company Users"), companyAdminController.getCompanyUser);
 
-router.delete("/fire-employers/:targetUserId", verifyToken, checkCompanyAdminPermissions("Fire Employers"), companyAdminController.fireEmployer);
+router.put("/:companyId/assign-role", verifyToken, checkCompanyAdminPermissions("Manage Company Users"), companyAdminController.assignCompanyUserRole);
 
-router.get("/jobs", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.getCompanyJobs);
+router.delete("/:companyId/fire-employers/:targetUserId", verifyToken, checkCompanyAdminPermissions("Fire Employers"), companyAdminController.fireEmployer);
 
-router.post("/jobs", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.createCompanyJob);
+router.get("/:companyId/jobs", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.getCompanyJobs);
 
-router.put("/jobs/:jobId", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.updateCompanyJob);
+router.get("/:companyId/jobs/:jobId", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.getCompanyJob);
 
-router.delete("/jobs/:jobId", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.deleteCompanyJob);
+router.post("/:companyId/jobs", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.createCompanyJob);
 
-router.get("/reports", verifyToken, checkCompanyAdminPermissions("View Company Reports"), companyAdminController.getCompanyReports);
+router.put("/:companyId/jobs/:jobId", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.updateCompanyJob);
+
+router.delete("/:companyId/jobs/:jobId", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.deleteCompanyJob);
+
+router.get("/:companyId/reports", verifyToken, checkCompanyAdminPermissions("View Company Reports"), companyAdminController.getCompanyReports);
 
 module.exports = router;

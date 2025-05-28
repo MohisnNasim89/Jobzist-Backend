@@ -7,12 +7,15 @@ const {
   getCompanyProfile,
   updateCompanyProfile,
   deleteCompany,
+  getCompanies
 } = require("../../controllers/profile/companyProfileController"); 
 const {
   companyValidationRules,
   companyIdValidationRules,
   validate,
 } = require("../../validations/companyValidation"); 
+
+router.get("/",  getCompanies);
 
 router.post("/create", verifyToken, companyValidationRules, validate, createCompany);
 

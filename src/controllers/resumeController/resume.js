@@ -48,14 +48,13 @@ exports.generateResume = async (req, res) => {
 
     const generated = await generateAIResume(resumeData);
 
-
     const resume = new Resume({
       userId,
       ...generated,
     });
     await resume.save();
 
-    res.status(201).json({ message: "Resume generated", resume: generated });
+    res.status(201).json({ message: "Resume generated", userId: userId });
   } catch (error) {
     logger.error(`Error generating resume: ${error.message}`);
     res.status(error.status || 500).json({
@@ -145,27 +144,48 @@ exports.editResume = async (req, res) => {
 
     await Resume.findByIdAndUpdate(resume._id, resumeUpdates);
 
-    const updatedResume = await Resume.findById(resume._id);
     res.status(200).json({
       message: "Resume updated successfully",
-      resume: {
-        userId: updatedResume.userId,
-        fullName: updatedResume.fullName,
-        bio: updatedResume.bio,
-        location: updatedResume.location,
-        contactInformation: updatedResume.contactInformation,
-        socialLinks: updatedResume.socialLinks,
-        education: updatedResume.education,
-        experiences: updatedResume.experiences,
-        projects: updatedResume.projects,
-        skills: updatedResume.skills,
-        uploadedResume: updatedResume.uploadedResume,
-      },
+      userId: userId,
     });
   } catch (error) {
     logger.error(`Error editing resume: ${error.message}`);
     res.status(error.status || 500).json({
       message: error.message || "An error occurred while editing the resume",
+    });
+  }
+};
+
+exports.getResumes = async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+
+    const total = await Resume.countDocuments({ isDeleted: false });
+    const resumes = await Resume.find({ isDeleted: false })
+      .select("_id userId fullName createdAt")
+      .populate("userId", "email")
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      .lean();
+
+    const resumeList = resumes.map(resume => ({
+      resumeId: resume._id,
+      userId: resume.userId.email || "Unknown",
+      fullName: resume.fullName || "Unnamed User",
+      createdAt: resume.createdAt,
+    }));
+
+    return res.status(200).json({
+      message: "Resumes retrieved successfully",
+      resumes: resumeList,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    logger.error(`Error retrieving resumes: ${error.message}`);
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while retrieving resumes",
     });
   }
 };

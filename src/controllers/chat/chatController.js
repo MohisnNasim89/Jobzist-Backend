@@ -4,9 +4,9 @@ const User = require("../../models/user/Users");
 const UserProfile = require("../../models/user/UserProfile");
 const logger = require("../../utils/logger");
 const { checkUserExists } = require("../../utils/checks");
-const { emitMessage, emitNotification } = require("../../socket/socket");
+const { emitMessage } = require("../../socket/socket");
 const { generateKey, encrypt, decrypt, encryptKey, decryptKey } = require("../../utils/encryption");
-const Notification = require("../../models/notification/Notification");
+const { sendNotification } = require("../utils/notificationUtility");
 
 exports.startChat = async (req, res) => {
   try {
@@ -14,7 +14,7 @@ exports.startChat = async (req, res) => {
     const { targetUserId } = req.params;
 
     if (userId.toString() === targetUserId.toString()) {
-      throw new Error("You cannot start a chat with yourself");
+      return res.status(400).json({ message: "You cannot start a chat with yourself" });
     }
 
     await checkUserExists(userId);
@@ -24,7 +24,7 @@ exports.startChat = async (req, res) => {
     const targetProfile = await UserProfile.findOne({ userId: targetUserId, isDeleted: false }).select("fullName").lean();
 
     if (!userProfile || !targetProfile) {
-      throw new Error("User profile not found");
+      return res.status(404).json({ message: "User profile not found" });
     }
 
     let chat = await Chat.findOne({
@@ -64,16 +64,16 @@ exports.sendMessage = async (req, res) => {
     const { message } = req.body;
 
     if (!message || typeof message !== "string" || message.trim() === "") {
-      throw new Error("Message must be a non-empty string");
+      return res.status(400).json({ message: "Message must be a non-empty string" });
     }
 
     const chat = await Chat.findOne({ _id: chatId }).select("participants messages encryptionKey");
     if (!chat) {
-      throw new Error("Chat not found");
+      return res.status(404).json({ message: "Chat not found" });
     }
 
     if (!chat.participants.some((p) => p.userId.toString() === userId.toString())) {
-      throw new Error("Unauthorized: You are not a participant in this chat");
+      return res.status(403).json({ message: "Unauthorized: You are not a participant in this chat" });
     }
 
     const decryptedEncryptionKey = decryptKey(chat.encryptionKey);
@@ -104,20 +104,21 @@ exports.sendMessage = async (req, res) => {
     await chat.save();
 
     const senderProfile = await UserProfile.findOne({ userId, isDeleted: false }).select("fullName").lean();
-    const notification = new Notification({
+    await sendNotification({
       userId: otherParticipant.userId,
       type: "newMessage",
       relatedId: chatId,
       message: `New message from ${senderProfile.fullName}`,
-      isRead: false,
     });
-    await notification.save();
-
-    emitNotification(otherParticipant.userId.toString(), notification);
 
     res.status(200).json({
       message: "Message sent successfully",
-      newMessage: { messageId: newMessage.messageId, message: message.trim(), sentAt: newMessage.sentAt, status: newMessage.status },
+      newMessage: {
+        messageId: newMessage.messageId,
+        message: message.trim(),
+        sentAt: newMessage.sentAt,
+        status: newMessage.status,
+      },
     });
   } catch (error) {
     logger.error(`Error sending message: ${error.message}`);
@@ -137,11 +138,11 @@ exports.getChatHistory = async (req, res) => {
       .select("participants messages encryptionKey")
       .lean();
     if (!chat) {
-      throw new Error("Chat not found");
+      return res.status(404).json({ message: "Chat not found" });
     }
 
     if (!chat.participants.some((p) => p.userId.toString() === userId.toString())) {
-      throw new Error("Unauthorized: You are not a participant in this chat");
+      return res.status(403).json({ message: "Unauthorized: You are not a participant in this chat" });
     }
 
     const startIndex = (page - 1) * limit;
@@ -154,7 +155,7 @@ exports.getChatHistory = async (req, res) => {
       message: decrypt(msg.encryptedMessage, decryptedEncryptionKey),
       sentAt: msg.sentAt,
       status: msg.status,
-      readAt: msg.readAt,
+      readAt: msg.readAt || null,
     }));
 
     res.status(200).json({
@@ -179,11 +180,11 @@ exports.markMessagesAsRead = async (req, res) => {
 
     const chat = await Chat.findOne({ _id: chatId }).select("participants messages");
     if (!chat) {
-      throw new Error("Chat not found");
+      return res.status(404).json({ message: "Chat not found" });
     }
 
     if (!chat.participants.some((p) => p.userId.toString() === userId.toString())) {
-      throw new Error("Unauthorized: You are not a participant in this chat");
+      return res.status(403).json({ message: "Unauthorized: You are not a participant in this chat" });
     }
 
     const otherParticipant = chat.participants.find(
@@ -242,17 +243,18 @@ exports.getUserChats = async (req, res) => {
 
     const totalChats = await Chat.countDocuments({ "participants.userId": userId });
 
-    const enrichedChats = await Promise.all(
+    const lightweightChats = await Promise.all(
       chats.map(async (chat) => {
         const otherParticipant = chat.participants.find(
           (p) => p.userId.toString() !== userId.toString()
         );
         const latestMessage = chat.messages[chat.messages.length - 1];
 
-        let decryptedMessage = null;
+        let decryptedMessagePreview = null;
         if (latestMessage) {
           const decryptedEncryptionKey = decryptKey(chat.encryptionKey);
-          decryptedMessage = decrypt(latestMessage.encryptedMessage, decryptedEncryptionKey);
+          const fullMessage = decrypt(latestMessage.encryptedMessage, decryptedEncryptionKey);
+          decryptedMessagePreview = fullMessage.length > 30 ? fullMessage.substring(0, 30) + "..." : fullMessage;
         }
 
         return {
@@ -261,14 +263,7 @@ exports.getUserChats = async (req, res) => {
             userId: otherParticipant.userId,
             name: otherParticipant.name,
           },
-          latestMessage: latestMessage
-            ? {
-                messageId: latestMessage.messageId,
-                message: decryptedMessage,
-                sentAt: latestMessage.sentAt,
-                status: latestMessage.status,
-              }
-            : null,
+          latestMessagePreview: decryptedMessagePreview || null,
           updatedAt: chat.updatedAt,
         };
       })
@@ -276,7 +271,7 @@ exports.getUserChats = async (req, res) => {
 
     res.status(200).json({
       message: "User chats retrieved successfully",
-      chats: enrichedChats,
+      chats: lightweightChats,
       page: parseInt(page),
       limit: parseInt(limit),
       total: totalChats,
@@ -294,13 +289,13 @@ exports.deleteChat = async (req, res) => {
     const { userId } = req.user;
     const { chatId } = req.params;
 
-    const chat = await Chat.findOne({ _id: chatId }).select("participants").lean();
+    const chat = await Chat.findOne({ _id: chatId }).select("participants");
     if (!chat) {
-      throw new Error("Chat not found");
+      return res.status(404).json({ message: "Chat not found" });
     }
 
     if (!chat.participants.some((p) => p.userId.toString() === userId.toString())) {
-      throw new Error("Unauthorized: You are not a participant in this chat");
+      return res.status(403).json({ message: "Unauthorized: You are not a participant in this chat" });
     }
 
     await Chat.deleteOne({ _id: chatId });
@@ -329,22 +324,22 @@ exports.deleteMessage = async (req, res) => {
 
     const chat = await Chat.findOne({ _id: chatId }).select("participants messages");
     if (!chat) {
-      throw new Error("Chat not found");
+      return res.status(404).json({ message: "Chat not found" });
     }
 
     if (!chat.participants.some((p) => p.userId.toString() === userId.toString())) {
-      throw new Error("Unauthorized: You are not a participant in this chat");
+      return res.status(403).json({ message: "Unauthorized: You are not a participant in this chat" });
     }
 
     const messageIndex = chat.messages.findIndex(
       (msg) => msg.messageId.toString() === messageId
     );
     if (messageIndex === -1) {
-      throw new Error("Message not found");
+      return res.status(404).json({ message: "Message not found" });
     }
 
     if (chat.messages[messageIndex].senderId.toString() !== userId.toString()) {
-      throw new Error("Unauthorized: You can only delete your own messages");
+      return res.status(403).json({ message: "Unauthorized: You can only delete your own messages" });
     }
 
     chat.messages.splice(messageIndex, 1);
@@ -375,27 +370,27 @@ exports.editMessage = async (req, res) => {
     const { newMessage } = req.body;
 
     if (!newMessage || typeof newMessage !== "string" || newMessage.trim() === "") {
-      throw new Error("New message must be a non-empty string");
+      return res.status(400).json({ message: "New message must be a non-empty string" });
     }
 
     const chat = await Chat.findOne({ _id: chatId }).select("participants messages encryptionKey");
     if (!chat) {
-      throw new Error("Chat not found");
+      return res.status(404).json({ message: "Chat not found" });
     }
 
     if (!chat.participants.some((p) => p.userId.toString() === userId.toString())) {
-      throw new Error("Unauthorized: You are not a participant in this chat");
+      return res.status(403).json({ message: "Unauthorized: You are not a participant in this chat" });
     }
 
     const messageIndex = chat.messages.findIndex(
       (msg) => msg.messageId.toString() === messageId
     );
     if (messageIndex === -1) {
-      throw new Error("Message not found");
+      return res.status(404).json({ message: "Message not found" });
     }
 
     if (chat.messages[messageIndex].senderId.toString() !== userId.toString()) {
-      throw new Error("Unauthorized: You can only edit your own messages");
+      return res.status(403).json({ message: "Unauthorized: You can only edit your own messages" });
     }
 
     const decryptedEncryptionKey = decryptKey(chat.encryptionKey);
@@ -415,7 +410,10 @@ exports.editMessage = async (req, res) => {
       action: "messageEdited",
     });
 
-    res.status(200).json({ message: "Message edited successfully", newMessage: newMessage.trim() });
+    res.status(200).json({
+      message: "Message edited successfully",
+      newMessage: newMessage.trim(),
+    });
   } catch (error) {
     logger.error(`Error editing message: ${error.message}`);
     res.status(error.status || 500).json({

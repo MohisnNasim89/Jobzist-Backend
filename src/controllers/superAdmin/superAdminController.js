@@ -10,6 +10,7 @@ const { checkRole } = require("../../utils/checks");
 exports.getAllUsers = async (req, res) => {
   try {
     const { userId, role } = req.user;
+    const { page = 1, limit = 10 } = req.query;
 
     checkRole(role, ["super_admin"], "Unauthorized: Only super admins can view all users");
 
@@ -24,14 +25,22 @@ exports.getAllUsers = async (req, res) => {
       throw new Error("Failed to retrieve users: Permission denied");
     }
 
-    const users = await User.find({ isDeleted: false })
+    const total = await User.countDocuments({ isDeleted: false, role: { $nin: ["super_admin"] } });
+    const users = await User.find({ isDeleted: false, role: { $nin: ["super_admin"] } })
       .select("email role createdAt updatedAt")
-      .nin("role", ["super_admin"])
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
       .lean();
 
     res.status(200).json({
       message: "Users retrieved successfully",
       users: users,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
     logger.error(`Error retrieving users: ${error.message}`);
@@ -66,7 +75,7 @@ exports.deleteUser = async (req, res) => {
       throw new Error("Failed to delete user: Target user not found");
     }
 
-    await User.findByIdAndUpdate(targetUserId, { isDeleted: true }); // Assuming softDelete sets isDeleted
+    await User.findByIdAndUpdate(targetUserId, { isDeleted: true });
 
     res.status(200).json({
       message: "User deleted successfully",
@@ -82,6 +91,7 @@ exports.deleteUser = async (req, res) => {
 exports.getAllJobs = async (req, res) => {
   try {
     const { userId, role } = req.user;
+    const { page = 1, limit = 10 } = req.query;
 
     checkRole(role, ["super_admin"], "Unauthorized: Only super admins can view all jobs");
 
@@ -96,14 +106,23 @@ exports.getAllJobs = async (req, res) => {
       throw new Error("Failed to retrieve jobs: Permission denied");
     }
 
+    const total = await Job.countDocuments({ isDeleted: false });
     const jobs = await Job.find({ isDeleted: false })
       .select("title companyId location jobType salary experienceLevel status createdAt")
       .populate("companyId", "name logo")
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
       .lean();
 
     res.status(200).json({
       message: "Jobs retrieved successfully",
-      jobs,
+      jobs: jobs,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
     logger.error(`Error retrieving jobs: ${error.message}`);
@@ -138,7 +157,7 @@ exports.deleteJob = async (req, res) => {
       throw new Error("Failed to delete job: Job not found");
     }
 
-    await Job.findByIdAndUpdate(jobId, { isDeleted: true }); // Assuming softDelete sets isDeleted
+    await Job.findByIdAndUpdate(jobId, { isDeleted: true });
 
     res.status(200).json({
       message: "Job deleted successfully",
@@ -154,6 +173,7 @@ exports.deleteJob = async (req, res) => {
 exports.getAllCompanies = async (req, res) => {
   try {
     const { userId, role } = req.user;
+    const { page = 1, limit = 10 } = req.query;
 
     checkRole(role, ["super_admin"], "Unauthorized: Only super admins can view all companies");
 
@@ -168,13 +188,22 @@ exports.getAllCompanies = async (req, res) => {
       throw new Error("Failed to retrieve companies: Permission denied");
     }
 
+    const total = await Company.countDocuments({ isDeleted: false });
     const companies = await Company.find({ isDeleted: false })
       .select("name logo location industry createdAt")
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
       .lean();
 
     res.status(200).json({
       message: "Companies retrieved successfully",
-      companies,
+      companies: companies,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
     logger.error(`Error retrieving companies: ${error.message}`);
@@ -209,7 +238,7 @@ exports.deleteCompany = async (req, res) => {
       throw new Error("Failed to delete company: Company not found");
     }
 
-    await Company.findByIdAndUpdate(companyId, { isDeleted: true }); // Assuming softDelete sets isDeleted
+    await Company.findByIdAndUpdate(companyId, { isDeleted: true });
 
     res.status(200).json({
       message: "Company deleted successfully",
@@ -399,14 +428,14 @@ exports.removeAdmin = async (req, res) => {
         .select("_id")
         .lean();
       if (adminProfile) {
-        await SuperAdmin.findByIdAndUpdate(adminProfile._id, { isDeleted: true }); // Assuming softDelete sets isDeleted
+        await SuperAdmin.findByIdAndUpdate(adminProfile._id, { isDeleted: true });
       }
     } else if (targetUser.role === "company_admin") {
       const adminProfile = await CompanyAdmin.findOne({ userId: targetUserId, isDeleted: false })
         .select("_id")
         .lean();
       if (adminProfile) {
-        await CompanyAdmin.findByIdAndUpdate(adminProfile._id, { isDeleted: true }); // Assuming softDelete sets isDeleted
+        await CompanyAdmin.findByIdAndUpdate(adminProfile._id, { isDeleted: true });
       }
     } else {
       throw new Error("Failed to remove admin: Target user is not an admin");
@@ -423,5 +452,16 @@ exports.removeAdmin = async (req, res) => {
     res.status(error.status || 500).json({
       message: error.message || "Failed to remove admin: An unexpected error occurred",
     });
+  }
+};
+
+exports.clearLogs = async (req, res) => {
+  try {
+    checkRole(req.user.role, ["super_admin"], "Only super admins can clear logs");
+    await logger.clearLogs();
+    res.status(200).json({ message: "Logs cleared successfully" });
+  } catch (error) {
+    logger.error(`Error clearing logs via API: ${error.message}`);
+    res.status(500).json({ message: "Failed to clear logs" });
   }
 };

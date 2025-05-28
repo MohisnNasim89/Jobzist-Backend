@@ -95,7 +95,7 @@ exports.getJobRecommendations = async (req, res) => {
     }
 
     const jobs = await Job.find(query)
-      .select("_id title skills location jobType experienceLevel salary companyId")
+      .select("_id title companyId skills location jobType experienceLevel salary")
       .populate("companyId", "name logo")
       .skip((page - 1) * limit)
       .limit(parseInt(limit))
@@ -116,17 +116,13 @@ exports.getJobRecommendations = async (req, res) => {
       .filter((r) => r.score >= 0)
       .sort((a, b) => b.score - a.score)
       .map((r) => ({
-        _id: r.job._id,
+        jobId: r.job._id,
         title: r.job.title,
         company: r.job.companyId ? {
-          _id: r.job.companyId._id,
+          companyId: r.job.companyId._id,
           name: r.job.companyId.name,
           logo: r.job.companyId.logo,
         } : null,
-        location: r.job.location,
-        jobType: r.job.jobType,
-        experienceLevel: r.job.experienceLevel,
-        salary: r.job.salary,
         matchScore: r.score,
       }));
 

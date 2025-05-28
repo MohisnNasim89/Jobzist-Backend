@@ -1,55 +1,33 @@
 const Job = require("../../models/job/Job");
 const logger = require("../../utils/logger");
-const { checkJobExists, checkCompanyExists, renderProfileWithFallback } = require("../../utils/checks");
+const { checkJobExists, checkCompanyExists } = require("../../utils/checks");
 
 exports.getJob = async (req, res) => {
   try {
     const { jobId } = req.params;
 
-    const jobQuery = checkJobExists(jobId);
-
-    const job = await jobQuery
+    const job = await checkJobExists(jobId)
       .select("_id title companyId postedBy description location jobType salary requirements skills experienceLevel applicationDeadline status createdAt")
       .populate({ path: "companyId", select: "name logo", match: { isDeleted: false } })
-      .populate({ path: "postedBy", populate: { path: "profileId", select: "fullName", match: { isDeleted: false } } })
-      .lean()
-      .exec();
-
-    if (!job) {
-      const error = new Error("Job not found");
-      error.status = 404;
-      throw error;
-    }
-
-    let isCreator = false;
-    if (req.user && req.user._id) {
-      const userId = req.user._id.toString();
-      const userRole = req.user.role;
-      const jobCreatorId = job.postedBy._id.toString();
-      const isEmployerOrAdmin = ["employer", "company_admin"].includes(userRole);
-      isCreator = isEmployerOrAdmin && userId === jobCreatorId;
-    }
-
-    const jobProfile = renderProfileWithFallback(job, "job", {
-      _id: job._id,
-      title: job.title,
-      company: job.companyId ? { _id: job.companyId._id, name: job.companyId.name, logo: job.companyId.logo } : null,
-      postedBy: job.postedBy?.profileId?.fullName || "Unknown",
-      description: job.description,
-      location: job.location,
-      jobType: job.jobType,
-      salary: job.salary,
-      requirements: job.requirements,
-      skills: job.skills,
-      experienceLevel: job.experienceLevel,
-      applicationDeadline: job.applicationDeadline,
-      status: job.status,
-      createdAt: job.createdAt,
-    }, isCreator);
+      .lean();
 
     res.status(200).json({
       message: "Job retrieved successfully",
-      job: jobProfile,
+      job: {
+        jobId: job._id,
+        title: job.title,
+        company: job.companyId ? { companyId: job.companyId._id, name: job.companyId.name, logo: job.companyId.logo } : null,
+        description: job.description,
+        location: job.location,
+        jobType: job.jobType,
+        salary: job.salary,
+        requirements: job.requirements,
+        skills: job.skills,
+        experienceLevel: job.experienceLevel,
+        applicationDeadline: job.applicationDeadline,
+        status: job.status,
+        createdAt: job.createdAt,
+      },
     });
   } catch (error) {
     logger.error(`Error retrieving job: ${error.message}`);
@@ -59,12 +37,11 @@ exports.getJob = async (req, res) => {
   }
 };
 
-exports.getJobs = async (req, res) => {
+exports.searchJobs = async (req, res) => {
   try {
     const { jobType, experienceLevel, location, page = 1, limit = 10 } = req.query;
 
     const query = { status: "Open", isDeleted: false };
-
     if (jobType) query.jobType = jobType;
     if (experienceLevel) query.experienceLevel = experienceLevel;
     if (location) {
@@ -75,41 +52,24 @@ exports.getJobs = async (req, res) => {
     }
 
     const jobs = await Job.find(query)
-      .select("_id title companyId postedBy location jobType salary experienceLevel applicationDeadline status createdAt")
+      .select("_id title companyId status")
       .populate({ path: "companyId", select: "name logo", match: { isDeleted: false } })
-      .populate({ path: "postedBy", populate: { path: "profileId", select: "fullName", match: { isDeleted: false } } })
       .skip((page - 1) * limit)
       .limit(parseInt(limit))
       .lean();
 
     const total = await Job.countDocuments(query);
 
-    const userId = req.user?._id?.toString();
-    const userRole = req.user?.role;
-    const isEmployerOrAdmin = userId && ["employer", "company_admin"].includes(userRole);
-
-    const jobProfiles = jobs.map((job) => {
-      const jobCreatorId = job.postedBy._id.toString();
-      const isCreator = isEmployerOrAdmin && userId === jobCreatorId;
-
-      return renderProfileWithFallback(job, "job", {
-        _id: job._id,
-        title: job.title,
-        company: job.companyId ? { _id: job.companyId._id, name: job.companyId.name, logo: job.companyId.logo } : null,
-        postedBy: job.postedBy?.profileId?.fullName || "Unknown",
-        location: job.location,
-        jobType: job.jobType,
-        salary: job.salary,
-        experienceLevel: job.experienceLevel,
-        applicationDeadline: job.applicationDeadline,
-        status: job.status,
-        createdAt: job.createdAt,
-      }, isCreator);
-    });
+    const jobList = jobs.map(job => ({
+      jobId: job._id,
+      title: job.title,
+      company: job.companyId ? { companyId: job.companyId._id, name: job.companyId.name, logo: job.companyId.logo } : null,
+      status: job.status,
+    }));
 
     res.status(200).json({
       message: "Jobs retrieved successfully",
-      jobs: jobProfiles,
+      jobs: jobList,
       total,
       page: parseInt(page),
       pages: Math.ceil(total / limit),
@@ -131,41 +91,24 @@ exports.getCompanyJobs = async (req, res) => {
 
     const query = { companyId, status: "Open", isDeleted: false };
     const jobs = await Job.find(query)
-      .select("_id title companyId postedBy location jobType salary experienceLevel applicationDeadline status createdAt")
+      .select("_id title companyId status")
       .populate({ path: "companyId", select: "name logo", match: { isDeleted: false } })
-      .populate({ path: "postedBy", populate: { path: "profileId", select: "fullName", match: { isDeleted: false } } })
       .skip((page - 1) * limit)
       .limit(parseInt(limit))
       .lean();
 
     const total = await Job.countDocuments(query);
 
-    const userId = req.user?._id?.toString();
-    const userRole = req.user?.role;
-    const isEmployerOrAdmin = userId && ["employer", "company_admin"].includes(userRole);
-
-    const jobProfiles = jobs.map((job) => {
-      const jobCreatorId = job.postedBy._id.toString();
-      const isCreator = isEmployerOrAdmin && userId === jobCreatorId;
-
-      return renderProfileWithFallback(job, "job", {
-        _id: job._id,
-        title: job.title,
-        company: job.companyId ? { _id: job.companyId._id, name: job.companyId.name, logo: job.companyId.logo } : null,
-        postedBy: job.postedBy?.profileId?.fullName || "Unknown",
-        location: job.location,
-        jobType: job.jobType,
-        salary: job.salary,
-        experienceLevel: job.experienceLevel,
-        applicationDeadline: job.applicationDeadline,
-        status: job.status,
-        createdAt: job.createdAt,
-      }, isCreator);
-    });
+    const jobList = jobs.map(job => ({
+      jobId: job._id,
+      title: job.title,
+      company: job.companyId ? { companyId: job.companyId._id, name: job.companyId.name, logo: job.companyId.logo } : null,
+      status: job.status,
+    }));
 
     res.status(200).json({
       message: "Company jobs retrieved successfully",
-      jobs: jobProfiles,
+      jobs: jobList,
       total,
       page: parseInt(page),
       pages: Math.ceil(total / limit),

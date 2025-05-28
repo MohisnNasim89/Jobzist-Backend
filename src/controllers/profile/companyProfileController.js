@@ -28,7 +28,7 @@ exports.createCompany = async (req, res) => {
       }
     }
 
-    if (!location.country || !location.city || !location.address) {
+    if (location && (!location.country || !location.city || !location.address)) {
       throw new Error("Location must include country, city, and address");
     }
 
@@ -86,30 +86,49 @@ exports.createCompany = async (req, res) => {
 
     await company.save();
 
-    await CompanyAdmin.findByIdAndUpdate( companyAdmin._id, { companyId: company._id });
-
-    const profileData = renderProfileWithFallback(company.toObject(), "company", {
-      name: "Unnamed Company",
-      industry: "Unknown Industry",
-      location: { country: "Unknown", city: "Unknown", address: "Unknown" },
-      website: "Not provided",
-      websiteDomain: "Not provided",
-      description: "No description available",
-      descriptionSummary: "No description",
-      companySize: "Unknown",
-      foundedYear: "Unknown",
-      socialLinks: [],
-      logo: "Not provided",
-      jobListings: [],
-    });
+    await CompanyAdmin.findByIdAndUpdate(companyAdmin._id, { companyId: company._id });
 
     return res.status(201).json({
       message: "Company created successfully",
-      company: { companyId: company._id, profile: profileData },
+      companyId: company._id,
     });
   } catch (error) {
     logger.error(`Error creating company: ${error.message}`);
     res.status(error.status || 500).json({ message: error.message });
+  }
+};
+
+exports.getCompanies = async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+
+    const total = await Company.countDocuments({ isDeleted: false });
+    const companies = await Company.find({ isDeleted: false })
+      .select("_id name industry location.city logo")
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      .lean();
+
+    const companyList = companies.map(company => ({
+      companyId: company._id,
+      name: company.name || "Unnamed Company",
+      industry: company.industry || "Unknown Industry",
+      city: company.location?.city || "Unknown",
+      logo: company.logo || "Not provided",
+    }));
+
+    return res.status(200).json({
+      message: "Companies retrieved successfully",
+      companies: companyList,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    logger.error(`Error retrieving companies: ${error.message}`);
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while retrieving companies",
+    });
   }
 };
 
@@ -134,7 +153,10 @@ exports.getCompanyProfile = async (req, res) => {
       jobListings: [],
     });
 
-    return res.status(200).json({ message: "Company profile retrieved successfully", profile: profileData });
+    return res.status(200).json({
+      message: "Company profile retrieved successfully",
+      profile: profileData,
+    });
   } catch (error) {
     logger.error(`Error retrieving company profile: ${error.message}`);
     res.status(error.status || 500).json({ message: error.message });
@@ -144,9 +166,16 @@ exports.getCompanyProfile = async (req, res) => {
 exports.updateCompanyProfile = async (req, res) => {
   try {
     const { companyId } = req.params;
+    const { userId } = req.user;
     const updates = req.body;
 
     const company = await checkCompanyExists(companyId);
+
+    // Authorization check: Only the associated CompanyAdmin can update
+    const companyAdmin = await CompanyAdmin.findOne({ userId, companyId, isDeleted: false });
+    if (!companyAdmin) {
+      throw new Error("Unauthorized: Only the company admin can update this profile");
+    }
 
     // Validate updates
     if (updates.location) {
@@ -201,24 +230,9 @@ exports.updateCompanyProfile = async (req, res) => {
 
     await company.save();
 
-    const profileData = renderProfileWithFallback(company.toObject(), "company", {
-      name: "Unnamed Company",
-      industry: "Unknown Industry",
-      location: { country: "Unknown", city: "Unknown", address: "Unknown" },
-      website: "Not provided",
-      websiteDomain: "Not provided",
-      description: "No description available",
-      descriptionSummary: "No description",
-      companySize: "Unknown",
-      foundedYear: "Unknown",
-      socialLinks: [],
-      logo: "Not provided",
-      jobListings: [],
-    });
-
     return res.status(200).json({
       message: "Company profile updated successfully",
-      profile: profileData,
+      companyId: company._id,
     });
   } catch (error) {
     logger.error(`Error updating company profile: ${error.message}`);
@@ -229,29 +243,30 @@ exports.updateCompanyProfile = async (req, res) => {
 exports.deleteCompany = async (req, res) => {
   try {
     const { companyId } = req.params;
+    const { userId } = req.user;
 
     const company = await checkCompanyExists(companyId);
 
-    // Soft-delete related jobs
+    const companyAdmin = await CompanyAdmin.findOne({ userId, companyId, isDeleted: false });
+    if (!companyAdmin) {
+      throw new Error("Unauthorized: Only the company admin can delete this company");
+    }
+
     await Job.updateMany({ companyId: companyId }, { $set: { isDeleted: true, deletedAt: new Date() } });
 
-    // Update Employers associated with the company
     await Employer.updateMany(
       { companyId: companyId },
       { $set: { status: "Inactive", companyId: null, companyName: null } }
     );
 
-    // Update Users in companyEmployees (reset role to job_seeker)
     const userIds = company.companyEmployees.map((emp) => emp.userId);
     await User.updateMany(
       { _id: { $in: userIds }, role: "employer" },
       { $set: { role: "job_seeker" } }
     );
 
-    // Soft-delete the company
     await company.softDelete();
 
-    // Unlink CompanyAdmin
     await CompanyAdmin.findOneAndUpdate(
       { companyId: companyId, isDeleted: false },
       { $set: { companyId: null } }

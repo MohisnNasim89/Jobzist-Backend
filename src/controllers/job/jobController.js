@@ -2,12 +2,10 @@ const Job = require("../../models/job/Job");
 const Company = require("../../models/company/Company");
 const JobSeeker = require("../../models/user/JobSeeker");
 const UserProfile = require("../../models/user/UserProfile");
-const Notification = require("../../models/notification/Notification");
 const Resume = require("../../models/resume/ResumeModel");
-const Employer = require("../../models/user/Employer"); // Assuming this exists
+const Employer = require("../../models/user/Employer");
 const logger = require("../../utils/logger");
-const { emitNotification } = require("../../socket/socket");
-
+const { sendNotification, sendNotificationsToUsers } = require("../utils/notificationUtility");
 const {
   checkUserExists,
   checkRole,
@@ -15,7 +13,6 @@ const {
   checkCompanyExists,
   checkEmployerExists,
   checkCompanyAdminExists,
-  renderProfileWithFallback,
 } = require("../../utils/checks");
 
 exports.createJob = async (req, res) => {
@@ -53,54 +50,52 @@ exports.createJob = async (req, res) => {
     await job.save();
 
     if (companyId && company) {
-      company.jobListings.push({ jobId: job._id });
+      company.jobListings.push(job._id);
       await company.save();
 
       const followers = await UserProfile.find({ followedCompanies: companyId })
-        .select("userId followedCompanies")
+        .select("userId")
         .lean();
       if (followers.length > 0) {
-        const notifications = followers.map((follower) => ({
-          userId: follower.userId,
+        const followerIds = followers.map(follower => follower.userId);
+        await sendNotificationsToUsers({
+          userIds: followerIds,
           type: "newJob",
           relatedId: job._id,
           message: `${company.name} posted a new job: ${job.title}`,
-          createdAt: new Date(),
-        }));
-        await Notification.insertMany(notifications);
-        notifications.forEach((notification) => {
-          emitNotification(notification.userId.toString(), notification);
         });
       }
     }
 
     if (role === "employer") {
       const employer = await checkEmployerExists(userId);
-      employer.jobListings.push({ jobId: job._id });
+      employer.jobListings.push(job._id);
       await employer.save();
-    }
 
-    const jobProfile = renderProfileWithFallback(job, "job", {
-      _id: job._id,
-      title: job.title,
-      companyId: job.companyId,
-      company: company ? { _id: company._id, name: company.name, logo: company.logo } : null,
-      postedBy: job.postedBy,
-      description: job.description,
-      location: job.location,
-      jobType: job.jobType,
-      salary: job.salary,
-      requirements: job.requirements,
-      skills: job.skills,
-      experienceLevel: job.experienceLevel,
-      applicationDeadline: job.applicationDeadline,
-      status: job.status,
-      createdAt: job.createdAt,
-    });
+      const connections = await UserProfile.find({ connections: userId })
+        .select("userId")
+        .lean();
+      if (connections.length > 0) {
+        const connectionIds = connections.map(conn => conn.userId);
+        await sendNotificationsToUsers({
+          userIds: connectionIds,
+          type: "newJob",
+          relatedId: job._id,
+          message: `Your connection ${employer.profileId?.fullName || "an employer"} posted a new job: ${job.title}`,
+        });
+      }
+    }
 
     res.status(200).json({
       message: "Job created successfully",
-      job: jobProfile,
+      job: {
+        jobId: job._id,
+        title: job.title,
+        companyId: job.companyId,
+        companyName: company?.name || null,
+        status: job.status,
+        createdAt: job.createdAt,
+      },
     });
   } catch (error) {
     logger.error(`Error creating job: ${error.message}`);
@@ -152,30 +147,19 @@ exports.updateJob = async (req, res) => {
     await job.save();
 
     const company = job.companyId ? await Company.findOne({ _id: job.companyId, isDeleted: false })
-      .select("_id name logo")
+      .select("name")
       .lean() : null;
-
-    const jobProfile = renderProfileWithFallback(job, "job", {
-      _id: job._id,
-      title: job.title,
-      companyId: job.companyId,
-      company: company ? { _id: company._id, name: company.name, logo: company.logo } : null,
-      postedBy: job.postedBy,
-      description: job.description,
-      location: job.location,
-      jobType: job.jobType,
-      salary: job.salary,
-      requirements: job.requirements,
-      skills: job.skills,
-      experienceLevel: job.experienceLevel,
-      applicationDeadline: job.applicationDeadline,
-      status: job.status,
-      updatedAt: job.updatedAt,
-    });
 
     res.status(200).json({
       message: "Job updated successfully",
-      job: jobProfile,
+      job: {
+        jobId: job._id,
+        title: job.title,
+        companyId: job.companyId,
+        companyName: company?.name || null,
+        status: job.status,
+        updatedAt: job.updatedAt,
+      },
     });
   } catch (error) {
     logger.error(`Error updating job: ${error.message}`);
@@ -206,18 +190,14 @@ exports.deleteJob = async (req, res) => {
 
     if (job.companyId) {
       const company = await checkCompanyExists(job.companyId);
-      company.jobListings = company.jobListings.filter(
-        (listing) => listing.jobId.toString() !== jobId.toString()
-      );
+      company.jobListings = company.jobListings.filter(id => id.toString() !== jobId.toString());
       await company.save();
     }
 
     if (role === "employer") {
       const employer = await checkEmployerExists(userId);
       if (employer.roleType === "Company Employer") {
-        employer.jobListings = employer.jobListings.filter(
-          (listing) => listing.jobId.toString() !== jobId.toString()
-        );
+        employer.jobListings = employer.jobListings.filter(id => id.toString() !== jobId.toString());
         await employer.save();
       }
     }
@@ -259,7 +239,6 @@ exports.hireCandidate = async (req, res) => {
     }
 
     const jobSeeker = await JobSeeker.findOne({ userId: jobSeekerId, isDeleted: false });
-    console.log("Job Seeker:", jobSeeker);
     if (!jobSeeker) {
       throw new Error("Job seeker not found");
     }
@@ -288,10 +267,7 @@ exports.hireCandidate = async (req, res) => {
       throw new Error("This candidate has already been offered this job");
     }
 
-    // Set applicant status to "Offered" instead of "Hired"
     applicant.status = "Offered";
-
-    // Update JobSeeker's appliedJobs status
     const appliedJobIndex = jobSeeker.appliedJobs.findIndex(
       (appliedJob) => appliedJob.jobId.toString() === jobId.toString()
     );
@@ -299,21 +275,16 @@ exports.hireCandidate = async (req, res) => {
       jobSeeker.appliedJobs[appliedJobIndex].status = "Offered";
     }
 
-    // Add to JobSeeker's jobOffers
     jobSeeker.jobOffers.push({ jobId });
-
     await job.save();
     await jobSeeker.save();
 
-    // Send notification to JobSeeker
-    const notification = new Notification({
+    await sendNotification({
       userId: jobSeeker.userId,
       type: "jobOffer",
       relatedId: job._id,
       message: `You have received a job offer for: ${job.title}`,
     });
-    await notification.save();
-    emitNotification(jobSeeker.userId.toString(), notification);
 
     res.status(200).json({ message: "Job offer sent to candidate successfully" });
   } catch (error) {
@@ -347,48 +318,55 @@ exports.toggleJobStatus = async (req, res) => {
     job.status = newStatus;
     await job.save();
 
+    if (newStatus === "Open") {
+      const employer = await checkEmployerExists(job.postedBy);
+      const company = job.companyId ? await checkCompanyExists(job.companyId) : null;
+
+      let connectionIds = [];
+      if (employer) {
+        const employerConnections = await UserProfile.find({ connections: job.postedBy })
+          .select("userId")
+          .lean();
+        connectionIds = employerConnections.map(conn => conn.userId);
+      }
+      if (company && companyId) {
+        const companyConnections = await UserProfile.find({ connections: { $in: companyAdminIds } })
+          .select("userId")
+          .lean();
+        connectionIds = [...connectionIds, ...companyConnections.map(conn => conn.userId)];
+      }
+
+      if (connectionIds.length > 0) {
+        await sendNotificationsToUsers({
+          userIds: connectionIds,
+          type: "jobStatusUpdate",
+          relatedId: job._id,
+          message: `The job "${job.title}" is now open for applications.`,
+        });
+      }
+    }
+
     if (job.applicants.length > 0) {
-      const notificationMessage = newStatus === "Open"
+      const message = newStatus === "Open"
         ? `The job "${job.title}" is now open for applications.`
         : `Applications for the job "${job.title}" are now closed.`;
-      const applicantNotifications = job.applicants.map((applicant) => ({
-        userId: applicant.userId,
+      const applicantIds = job.applicants.map(applicant => applicant.userId);
+      await sendNotificationsToUsers({
+        userIds: applicantIds,
         type: "applicationUpdate",
         relatedId: job._id,
-        message: notificationMessage,
-        createdAt: new Date(),
-      }));
-      await Notification.insertMany(applicantNotifications);
-      applicantNotifications.forEach((notification) => {
-        emitNotification(notification.userId.toString(), notification);
+        message,
       });
     }
 
-    const company = job.companyId ? await Company.findOne({ _id: job.companyId, isDeleted: false })
-      .select("_id name logo")
-      .lean() : null;
-
-    const jobProfile = renderProfileWithFallback(job, "job", {
-      _id: job._id,
-      title: job.title,
-      companyId: job.companyId,
-      company: company ? { _id: company._id, name: company.name, logo: company.logo } : null,
-      postedBy: job.postedBy,
-      description: job.description,
-      location: job.location,
-      jobType: job.jobType,
-      salary: job.salary,
-      requirements: job.requirements,
-      skills: job.skills,
-      experienceLevel: job.experienceLevel,
-      applicationDeadline: job.applicationDeadline,
-      status: job.status,
-      updatedAt: job.updatedAt,
-    });
-
     res.status(200).json({
       message: `Job application status toggled to ${newStatus} successfully`,
-      job: jobProfile,
+      job: {
+        jobId: job._id,
+        title: job.title,
+        status: job.status,
+        updatedAt: job.updatedAt,
+      },
     });
   } catch (error) {
     logger.error(`Error toggling job status: ${error.message}`);
@@ -490,19 +468,22 @@ exports.getJobApplicants = async (req, res) => {
   try {
     const { jobId } = req.params;
     const { userId, role } = req.user;
+    const { page = 1, limit = 10 } = req.query;
 
     checkRole(role, ["employer", "company_admin"], "Unauthorized: Only employers and company admins can view job applicants");
 
     const job = await Job.findOne({ _id: jobId, isDeleted: false })
+      .select("applicants postedBy companyId")
       .populate({
         path: "applicants.userId",
         model: "JobSeeker",
-        match: { isDeleted: false }, 
+        match: { isDeleted: false },
+        select: "userId fullName",
         populate: {
           path: "userId",
           model: "User",
           select: "email",
-          match: { isDeleted: false }, 
+          match: { isDeleted: false },
         },
       })
       .lean();
@@ -525,26 +506,32 @@ exports.getJobApplicants = async (req, res) => {
       return res.status(200).json({
         message: "No applicants found for this job",
         applicants: [],
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: 0,
       });
     }
 
-    const applicants = job.applicants.map((applicant) => {
-      const user = applicant.userId?.userId; 
-      return {
-        userId: applicant.userId?._id,
-        email: user?.email || "N/A", 
+    const total = job.applicants.length;
+    const startIndex = (page - 1) * limit;
+    const paginatedApplicants = job.applicants.slice(startIndex, startIndex + parseInt(limit));
+
+    const applicants = paginatedApplicants
+      .filter(applicant => applicant.userId)
+      .map((applicant) => ({
+        userId: applicant.userId._id,
         fullName: applicant.userId?.fullName || "N/A",
+        email: applicant.userId?.userId?.email || "N/A",
         appliedAt: applicant.appliedAt,
         status: applicant.status,
-        coverLetter: applicant.coverLetter,
-        atsScore: applicant.atsScore,
-        resume: applicant.resume,
-      };
-    });
+      }));
 
     res.status(200).json({
       message: "Job applicants retrieved successfully",
       applicants,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      total,
     });
   } catch (error) {
     logger.error(`Error retrieving job applicants: ${error.message}`);

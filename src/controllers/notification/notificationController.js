@@ -6,18 +6,24 @@ exports.getNotifications = async (req, res) => {
   try {
     const { userId } = req.params;
     const { userId: authenticatedUserId } = req.user;
+    const { page = 1, limit = 50 } = req.query;
 
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only view your own notifications");
 
+    const total = await Notification.countDocuments({ userId, isDeleted: false });
     const notifications = await Notification.find({ userId, isDeleted: false })
       .select("_id userId type message createdAt isRead")
       .sort({ createdAt: -1 })
-      .limit(50)
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
       .lean();
 
     res.status(200).json({
       message: "Notifications retrieved successfully",
       notifications,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
     });
   } catch (error) {
     logger.error(`Error retrieving notifications: ${error.message}`);

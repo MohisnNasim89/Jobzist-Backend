@@ -12,32 +12,8 @@ const { uploadProfilePic, uploadResume } = require("../controllers/uploadControl
 
 const router = express.Router();
 
-router.post(
-  "/:userId/profile-pic",
-  verifyToken,
-  userIdValidationRules,
-  companyIdValidationRules,
-  validate,
-  upload.single("file"), 
-  uploadProfilePic
-);
+router.post("/:userId/profile-pic", verifyToken, userIdValidationRules, companyIdValidationRules, validate, upload.single("file"), uploadProfilePic);
 
-router.post(
-  "/:userId/resume",
-  verifyToken,
-  userIdValidationRules,
-  validate,
-  upload.single("file"), 
-  uploadResume
-);
-
-router.post(
-  "/posts",
-  verifyToken,
-  upload.array("media", 5), 
-  (req, res) => {
-    res.status(200).json({ message: "Files uploaded", files: req.files });
-  }
-);
+router.post("/:userId/resume", verifyToken, userIdValidationRules, validate, upload.single("file"), uploadResume);
 
 module.exports = router;

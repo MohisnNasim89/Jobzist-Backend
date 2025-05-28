@@ -7,31 +7,30 @@ const {
   commentValidationRules,
   validate,
 } = require("../../validations/postValidation");
-const { createPost, getPost, getUserPosts, updatePost, deletePost, 
-      likePost, commentOnPost, deleteComment, sharePost, savePost, togglePostVisibility} = require("../../controllers/post/postController");
+const postController = require("../../controllers/post/postController");
 
 const router = express.Router();
 
-router.post("/", verifyToken, createPostValidationRules, validate, upload.array("media", 5), createPost);
+router.post("/", verifyToken, createPostValidationRules, validate, upload.array("media", 5), postController.createPost);
 
-router.get("/:postId", verifyToken, postIdValidationRules, validate, getPost);
+router.get("/:postId", verifyToken, postIdValidationRules, validate, postController.getPost);
 
-router.get("/user/:userId", verifyToken, postIdValidationRules, validate, getUserPosts);
+router.get("/user/:userId", verifyToken, postIdValidationRules, validate, postController.getUserPosts);
 
-router.put("/:postId", verifyToken, postIdValidationRules, createPostValidationRules, validate, upload.array("media", 5), updatePost);
+router.put("/:postId", verifyToken, postIdValidationRules, createPostValidationRules, validate, upload.array("media", 5), postController.updatePost);
 
-router.delete("/:postId", verifyToken, postIdValidationRules, validate, deletePost);
+router.delete("/:postId", verifyToken, postIdValidationRules, validate, postController.deletePost);
 
-router.post("/:postId/like", verifyToken, postIdValidationRules, validate, likePost);
+router.post("/:postId/like", verifyToken, postIdValidationRules, validate, postController.likePost);
 
-router.post("/:postId/comment", verifyToken, postIdValidationRules, commentValidationRules, validate, commentOnPost);
+router.post("/:postId/comment", verifyToken, postIdValidationRules, commentValidationRules, validate, postController.commentOnPost);
 
-router.delete("/:postId/comment/:commentId", verifyToken, postIdValidationRules, validate, deleteComment);
+router.delete("/:postId/comment/:commentId", verifyToken, postIdValidationRules, validate, postController.deleteComment);
 
-router.post("/:postId/share", verifyToken, postIdValidationRules, validate, sharePost);
+router.post("/:postId/share", verifyToken, postIdValidationRules, validate, postController.sharePost);
 
-router.post("/:postId/save", verifyToken, postIdValidationRules, validate, savePost);
+router.post("/:postId/save", verifyToken, postIdValidationRules, validate, postController.savePost);
 
-router.patch("/:postId/visibility", verifyToken, postIdValidationRules, validate, togglePostVisibility);
+router.patch("/:postId/visibility", verifyToken, postIdValidationRules, validate, postController.togglePostVisibility);
 
 module.exports = router;

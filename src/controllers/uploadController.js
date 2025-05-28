@@ -8,6 +8,8 @@ const {
   checkCompanyAdminExists,
 } = require("../utils/checks");
 
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit
+
 exports.uploadProfilePic = async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -22,6 +24,10 @@ exports.uploadProfilePic = async (req, res) => {
     const allowedTypes = ["image/jpeg", "image/png"];
     if (!allowedTypes.includes(req.file.mimetype)) {
       throw new Error("Invalid file type. Allowed types: image/jpeg, image/png");
+    }
+
+    if (req.file.size > MAX_FILE_SIZE) {
+      throw new Error("File size exceeds 5MB limit");
     }
 
     const user = await checkUserExists(userId);
@@ -45,7 +51,7 @@ exports.uploadProfilePic = async (req, res) => {
       await company.save();
     }
 
-    return res.status(200).json({
+    res.status(200).json({
       message: "Profile picture uploaded and saved successfully",
       url: req.file.path,
     });
@@ -73,6 +79,10 @@ exports.uploadResume = async (req, res) => {
       throw new Error("Invalid file type. Allowed type: application/pdf");
     }
 
+    if (req.file.size > MAX_FILE_SIZE) {
+      throw new Error("File size exceeds 5MB limit");
+    }
+
     const user = await checkUserExists(userId);
     checkRole(user.role, ["job_seeker"], "Only job seekers can upload a resume");
 
@@ -84,7 +94,7 @@ exports.uploadResume = async (req, res) => {
     jobSeeker.resume = req.file.path;
     await jobSeeker.save();
 
-    return res.status(200).json({
+    res.status(200).json({
       message: "Resume uploaded and saved successfully",
       url: req.file.path,
     });

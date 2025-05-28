@@ -5,56 +5,81 @@ const { checkUserExists } = require("../../utils/checks");
 
 exports.searchUsersAndCompanies = async (req, res) => {
   try {
-    const { query, userLimit = 10, companyLimit = 10, page = 1 } = req.query;
+    const { query, userLimit = 10, companyLimit = 10, page = 1, role, location, industry } = req.query;
 
     if (!query || query.trim().length < 2) {
       throw new Error("Search query must be at least 2 characters long");
     }
 
     const sanitizedQuery = query.trim();
-
     const userSkip = (page - 1) * userLimit;
     const companySkip = (page - 1) * companyLimit;
 
-    // Search for users
-    const users = await UserProfile.find({
-      fullName: { $regex: sanitizedQuery, $options: "i" },
+    const userQuery = {
       isDeleted: false,
-    })
-      .select("fullName userId")
+      $or: [
+        { fullName: { $regex: sanitizedQuery, $options: "i" } },
+        { skills: { $regex: sanitizedQuery, $options: "i" } },
+      ],
+    };
+    if (role) userQuery["userId.role"] = role;
+    if (location) userQuery["location.city"] = { $regex: location, $options: "i" };
+
+    const companyQuery = {
+      isDeleted: false,
+      $or: [
+        { name: { $regex: sanitizedQuery, $options: "i" } },
+        { industry: { $regex: sanitizedQuery, $options: "i" } },
+      ],
+    };
+    if (industry) companyQuery.industry = { $regex: industry, $options: "i" };
+    if (location) companyQuery["location.city"] = { $regex: location, $options: "i" };
+
+    const totalUsers = await UserProfile.countDocuments(userQuery);
+    const totalCompanies = await Company.countDocuments(companyQuery);
+
+    const users = await UserProfile.find(userQuery)
+      .select("fullName userId skills location")
       .populate("userId", "email role")
       .skip(userSkip)
       .limit(parseInt(userLimit))
       .lean();
 
-    const companies = await Company.find({
-      name: { $regex: sanitizedQuery, $options: "i" },
-      isDeleted: false,
-    })
-      .select("name")
+    const companies = await Company.find(companyQuery)
+      .select("name industry location.city")
       .skip(companySkip)
       .limit(parseInt(companyLimit))
       .lean();
 
     const curatedUsers = users.map(user => ({
-      fullName: user.fullName,
       userId: user.userId._id,
-      email: user.userId.email,
-      role: user.userId.role,
+      fullName: user.fullName || "Unnamed User",
+      email: user.userId.email || "Not provided",
+      role: user.userId.role || "Unknown",
+      skills: user.skills || [],
+      city: user.location?.city || "Unknown",
     }));
 
     const curatedCompanies = companies.map(company => ({
-      name: company.name,
       companyId: company._id,
+      name: company.name || "Unnamed Company",
+      industry: company.industry || "Unknown",
+      city: company.location?.city || "Unknown",
     }));
 
     res.status(200).json({
       message: "Search results retrieved successfully",
       users: curatedUsers,
       companies: curatedCompanies,
-      page: parseInt(page),
-      userLimit: parseInt(userLimit),
-      companyLimit: parseInt(companyLimit),
+      pagination: {
+        page: parseInt(page),
+        userLimit: parseInt(userLimit),
+        companyLimit: parseInt(companyLimit),
+        userPages: Math.ceil(totalUsers / userLimit),
+        companyPages: Math.ceil(totalCompanies / companyLimit),
+        totalUsers,
+        totalCompanies,
+      },
     });
   } catch (error) {
     logger.error(`Error searching users and companies: ${error.message}`);
@@ -91,40 +116,48 @@ exports.getConnectionSuggestions = async (req, res) => {
     const userSkills = userProfile.skills || [];
     const userLocation = userProfile.location?.city?.toLowerCase() || "";
 
-    const suggestions = await UserProfile.find({
+    const suggestionQuery = {
       $and: [
-        { _id: { $ne: userProfile._id } }, 
+        { _id: { $ne: userProfile._id } },
+        { userId: { $ne: userId } }, 
         { isDeleted: false },
         {
           $or: [
-            { connections: { $in: connections } }, 
-            { skills: { $in: userSkills } }, 
-            userLocation ? { "location.city": { $regex: userLocation, $options: "i" } } : {}, 
+            { connections: { $in: connections } },
+            { skills: { $in: userSkills } },
+            userLocation ? { "location.city": { $regex: userLocation, $options: "i" } } : {},
           ],
         },
       ],
-    })
+    };
+
+    const totalSuggestions = await UserProfile.countDocuments(suggestionQuery);
+
+    const suggestions = await UserProfile.find(suggestionQuery)
       .select("fullName userId skills location")
       .populate("userId", "email role")
       .skip((page - 1) * parseInt(limit))
       .limit(parseInt(limit))
       .lean();
 
-    // Curate response
     const curatedSuggestions = suggestions.map(suggestion => ({
       userId: suggestion.userId._id,
-      fullName: suggestion.fullName,
-      email: suggestion.userId.email,
-      role: suggestion.userId.role,
-      skills: suggestion.skills,
-      location: suggestion.location,
+      fullName: suggestion.fullName || "Unnamed User",
+      email: suggestion.userId.email || "Not provided",
+      role: suggestion.userId.role || "Unknown",
+      skills: suggestion.skills || [],
+      city: suggestion.location?.city || "Unknown",
     }));
 
     res.status(200).json({
       message: "Connection suggestions retrieved successfully",
       suggestions: curatedSuggestions,
-      page: parseInt(page),
-      limit: parseInt(limit),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: totalSuggestions,
+        pages: Math.ceil(totalSuggestions / limit),
+      },
     });
   } catch (error) {
     logger.error(`Error retrieving connection suggestions: ${error.message}`);

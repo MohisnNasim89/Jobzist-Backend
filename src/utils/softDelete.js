@@ -1,38 +1,37 @@
 const mongoose = require("mongoose");
+const logger = require("./logger");
 
-// Apply soft delete middleware to a schema
 const applySoftDelete = (schema) => {
-  // Add soft delete fields to the schema
   schema.add({
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date, default: null },
   });
 
-  // Middleware to filter out soft-deleted documents
-  schema.pre("find", function (next) {
+  const softDeleteFilter = function (next) {
     this.where({ isDeleted: false });
     next();
-  });
+  };
 
-  schema.pre("findOne", function (next) {
-    this.where({ isDeleted: false });
-    next();
-  });
+  schema.pre("find", softDeleteFilter);
+  schema.pre("findOne", softDeleteFilter);
+  schema.pre("findOneAndUpdate", softDeleteFilter);
+  schema.pre("updateMany", softDeleteFilter);
 
-  // Method to soft delete a document
   schema.methods.softDelete = async function () {
     this.isDeleted = true;
     this.deletedAt = new Date();
     await this.save();
+    logger.info(`Soft deleted document: ${this._id} in collection ${this.constructor.modelName}`);
   };
 };
 
-// Helper to soft delete related documents
 const softDeleteRelated = async (modelName, query) => {
   const Model = mongoose.model(modelName);
-  const doc = await Model.findOne(query);
-  if (doc && !doc.isDeleted) {
-    await doc.softDelete();
+  const docs = await Model.find(query);
+  for (const doc of docs) {
+    if (!doc.isDeleted) {
+      await doc.softDelete();
+    }
   }
 };
 
