@@ -6,7 +6,7 @@ const logger = require("../../utils/logger");
 const { checkUserExists } = require("../../utils/checks");
 const { emitMessage } = require("../../socket/socket");
 const { generateKey, encrypt, decrypt, encryptKey, decryptKey } = require("../../utils/encryption");
-const { sendNotification } = require("../utils/notificationUtility");
+const { sendNotification } = require("../../utils/notification");
 
 exports.startChat = async (req, res) => {
   try {

@@ -5,9 +5,9 @@ const Employer = require("../../models/user/Employer");
 const CompanyAdmin = require("../../models/company/CompanyAdmin");
 const Company = require("../../models/company/Company");
 const logger = require("../../utils/logger");
-const Notification = require("../models/notification/Notification");
+const Notification = require("../../models/notification/Notification");
 const { checkUserExists, checkUserIdMatch, checkUserProfileExists, renderProfileWithFallback } = require("../../utils/checks");
-const { emitNotification } = require("../socket");
+const { emitNotification } = require("../../socket/socket");
 
 exports.createUserProfile = async (req, res) => {
   try {

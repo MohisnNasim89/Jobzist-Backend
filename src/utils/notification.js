@@ -1,5 +1,5 @@
 const Notification = require("../models/notification/Notification");
-const { emitNotification } = require("../socket");
+const { emitNotification } = require("../socket/socket");
 const logger = require("./logger");
 
 const sendNotification = async ({ userId, type, relatedId, message }) => {

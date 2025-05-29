@@ -21,6 +21,6 @@ router.post("/assign-admin", verifyToken, superAdminController.assignAdmin);
 
 router.delete("/remove-admin/:targetUserId", verifyToken, superAdminController.removeAdmin);
 
-router.post("/logs/clear", verifyToken, clearLogs);
+router.post("/logs/clear", verifyToken, superAdminController.clearLogs);
 
 module.exports = router;

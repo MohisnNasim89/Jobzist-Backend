@@ -6,7 +6,7 @@ const Company = require("../../models/company/Company");
 const CompanyAdmin = require("../../models/company/CompanyAdmin");
 const Employer = require("../../models/user/Employer");
 const { checkCompanyExists } = require("../../utils/checks");
-const { sendNotification, sendNotificationsToUsers } = require("../utils/notificationUtility");
+const { sendNotification, sendNotificationsToUsers } = require("../../utils/notification");
 
 exports.getCompanyEmployerApprovalRequests = async (req, res) => {
   try {

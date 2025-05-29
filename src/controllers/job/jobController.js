@@ -5,7 +5,7 @@ const UserProfile = require("../../models/user/UserProfile");
 const Resume = require("../../models/resume/ResumeModel");
 const Employer = require("../../models/user/Employer");
 const logger = require("../../utils/logger");
-const { sendNotification, sendNotificationsToUsers } = require("../utils/notificationUtility");
+const { sendNotification, sendNotificationsToUsers } = require("../../utils/notification");
 const {
   checkUserExists,
   checkRole,

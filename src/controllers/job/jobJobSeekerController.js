@@ -3,7 +3,7 @@ const Job = require("../../models/job/Job");
 const JobSeeker = require("../../models/user/JobSeeker");
 const Employer = require("../../models/user/Employer");
 const logger = require("../../utils/logger");
-const { sendNotification } = require("../utils/notificationUtility");
+const { sendNotification } = require("../../utils/notification");
 const { checkRole, checkJobExists, checkJobSeekerExists } = require("../../utils/checks");
 const { getATSScore, generateCoverLetter } = require("../../services/aiService");
 
