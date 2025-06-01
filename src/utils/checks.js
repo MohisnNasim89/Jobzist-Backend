@@ -27,7 +27,7 @@ const checkUserExists = async (userId) => {
   const cachedUser = cache.get(cacheKey);
   if (cachedUser) return cachedUser;
 
-  const user = await User.findOne({ _id: sanitizedId, isDeleted: false }).lean();
+  const user = await User.findOne({ _id: sanitizedId });
   if (!user) {
     const error = new Error("User not found");
     error.status = 404;
@@ -53,7 +53,9 @@ const checkUserProfileExists = async (userId) => {
   const cachedProfile = cache.get(cacheKey);
   if (cachedProfile) return cachedProfile;
 
-  const userProfile = await UserProfile.findOne({ userId: sanitizedId, isDeleted: false }).lean();
+  const userProfile = await UserProfile.findOne({ userId: sanitizedId })
+    .lean()
+    .exec();
   if (!userProfile) {
     const error = new Error("User profile not found");
     error.status = 404;
@@ -73,7 +75,7 @@ const checkRole = (role, allowedRoles, message) => {
 
 const checkJobExists = async (jobId) => {
   const sanitizedId = sanitizeId(jobId);
-  const job = await Job.findOne({ _id: sanitizedId, isDeleted: false }).lean();
+  const job = await Job.findOne({ _id: sanitizedId });
   if (!job) {
     const error = new Error("Job not found");
     error.status = 404;
@@ -84,7 +86,7 @@ const checkJobExists = async (jobId) => {
 
 const checkCompanyExists = async (companyId) => {
   const sanitizedId = sanitizeId(companyId);
-  const company = await Company.findOne({ _id: sanitizedId, isDeleted: false }).lean();
+  const company = await Company.findOne({ _id: sanitizedId });
   if (!company) {
     const error = new Error("Company not found");
     error.status = 404;
@@ -95,7 +97,7 @@ const checkCompanyExists = async (companyId) => {
 
 const checkEmployerExists = async (userId) => {
   const sanitizedId = sanitizeId(userId);
-  const employer = await Employer.findOne({ userId: sanitizedId, isDeleted: false }).lean();
+  const employer = await Employer.findOne({ userId: sanitizedId });
   if (!employer) {
     const error = new Error("Employer not found");
     error.status = 404;
@@ -106,7 +108,7 @@ const checkEmployerExists = async (userId) => {
 
 const checkCompanyAdminExists = async (userId) => {
   const sanitizedId = sanitizeId(userId);
-  const companyAdmin = await CompanyAdmin.findOne({ userId: sanitizedId, isDeleted: false }).lean();
+  const companyAdmin = await CompanyAdmin.findOne({ userId: sanitizedId });
   if (!companyAdmin) {
     const error = new Error("Company admin not found");
     error.status = 404;
@@ -117,7 +119,7 @@ const checkCompanyAdminExists = async (userId) => {
 
 const checkJobSeekerExists = async (userId) => {
   const sanitizedId = sanitizeId(userId);
-  const jobSeeker = await JobSeeker.findOne({ userId: sanitizedId, isDeleted: false }).lean();
+  const jobSeeker = await JobSeeker.findOne({ userId: sanitizedId });
   if (!jobSeeker) {
     const error = new Error("Job seeker not found");
     error.status = 404;
@@ -128,7 +130,7 @@ const checkJobSeekerExists = async (userId) => {
 
 const checkPostExists = async (postId) => {
   const sanitizedId = sanitizeId(postId);
-  const post = await Post.findOne({ _id: sanitizedId, isDeleted: false }).lean();
+  const post = await Post.findOne({ _id: sanitizedId });
   if (!post) {
     const error = new Error("Post not found");
     error.status = 404;
@@ -158,7 +160,7 @@ const checkUserOrCompanyExists = async (type, id) => {
     error.status = 400;
     throw error;
   }
-  const entity = await model.findOne({ _id: sanitizedId, isDeleted: false }).lean();
+  const entity = await model.findOne({ _id: sanitizedId });
   if (!entity) {
     const error = new Error(`${type.charAt(0).toUpperCase() + type.slice(1)} not found`);
     error.status = 404;

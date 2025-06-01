@@ -8,6 +8,7 @@ const {
 const router = express.Router();
 
 router.get("/:userId", verifyToken, getNotifications);
+
 router.put("/:notificationId/read", verifyToken, markNotificationAsRead);
 
 module.exports = router;

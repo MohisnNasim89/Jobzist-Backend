@@ -14,7 +14,7 @@ const { verifyToken } = require("../../middlewares/authMiddleware");
 
 router.get("/user", verifyToken, getUserChats);
 
-router.get("/start/:targetUserId", verifyToken, startChat);
+router.get("/:targetUserId/start", verifyToken, startChat);
 
 router.get("/:chatId", verifyToken, getChatHistory);
 

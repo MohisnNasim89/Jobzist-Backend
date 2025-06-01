@@ -11,21 +11,21 @@ const { initSocket } = require("./src/socket/socket");
 const {generalRateLimiter} = require("./src/middlewares/rateLimiter");
 
 // Routes
-const authRoutes = require("./src/routes/authRoutes");
-const userProfileRoutes = require("./src/routes/profile/userProfileRoutes");
-const companyProfileRoutes = require("./src/routes/profile/companyProfileRoutes");
-const uploadRoutes = require("./src/routes/uploadRoutes");
+const authRoutes = require("./src/routes/authRoutes"); //tested
+const userProfileRoutes = require("./src/routes/profile/userProfileRoutes"); //tested
+const companyProfileRoutes = require("./src/routes/profile/companyProfileRoutes"); //tested
+const uploadRoutes = require("./src/routes/uploadRoutes"); //tested
 const jobRoutes = require("./src/routes/job/jobRoutes");
 const postRoutes = require("./src/routes/post/postRoutes");
-const userRoutes = require("./src/routes/userConnection/connectionRoutes");
-const notificationRoutes = require("./src/routes/notification/notificationRoutes");
+const userRoutes = require("./src/routes/userConnection/connectionRoutes"); //tested
+const notificationRoutes = require("./src/routes/notification/notificationRoutes"); //tested
 const feedRoutes = require("./src/routes/feed/feedRoutes");
-const searchRoutes = require("./src/routes/search/searchRoutes");
+const searchRoutes = require("./src/routes/search/searchRoutes"); //tested
 const recommendationRoutes = require("./src/routes/recommendation/recommendationRoutes");
-const chatRoutes = require("./src/routes/chat/chatRoutes");
-const resumeRoutes = require("./src/routes/resume/resumeRoutes");
-const companyAdminRoutes = require("./src/routes/companyAdmin/companyAdminRoutes");
-const superAdminRoutes = require("./src/routes/superAdmin/superAdminRoutes");
+const chatRoutes = require("./src/routes/chat/chatRoutes"); //tested
+const resumeRoutes = require("./src/routes/resume/resumeRoutes"); //tested
+const companyAdminRoutes = require("./src/routes/companyAdmin/companyAdminRoutes"); //tested-half
+const superAdminRoutes = require("./src/routes/superAdmin/superAdminRoutes"); //tested-half
 
 dotenv.config();
 const app = express();
@@ -46,7 +46,7 @@ app.use("/api/v1/company", companyProfileRoutes);
 app.use("/api/v1/upload", uploadRoutes);
 app.use("/api/v1/job", jobRoutes);
 app.use("/api/v1/post", postRoutes);
-app.use("/api/v1/users", userRoutes);
+app.use("/api/v1/connect", userRoutes);
 app.use("/api/v1/notifications", notificationRoutes);
 app.use("/api/v1/feed", feedRoutes);
 app.use("/api/v1/search", searchRoutes);
@@ -90,7 +90,6 @@ connectDB()
     process.exit(1);
   });
 
-// Graceful Shutdown
 process.on("SIGINT", async () => {
   console.log("Shutting down server...");
   try {

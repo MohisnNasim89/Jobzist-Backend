@@ -25,7 +25,12 @@ exports.getCompanyEmployerApprovalRequests = async (req, res) => {
       isDeleted: false,
     })
       .select("_id userId companyId companyName status createdAt")
-      .populate({ path: "userId", select: "email", match: { isDeleted: false } })
+      .populate({
+        path: "userId",
+        select: "email",
+        match: { isDeleted: false },
+        populate: { path: "profileId", select: "fullName", match: { isDeleted: false } },
+      })
       .skip((page - 1) * limit)
       .limit(parseInt(limit))
       .lean();
@@ -45,6 +50,7 @@ exports.getCompanyEmployerApprovalRequests = async (req, res) => {
         employerId: request._id,
         userId: request.userId._id,
         email: request.userId.email,
+        employeeName: request.userId.profileId?.fullName || "Unknown",
         companyId: request.companyId,
         companyName: request.companyName,
         status: request.status,
@@ -70,8 +76,13 @@ exports.getCompanyEmployerApproval = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized: You can only view employers for your own company" });
     }
 
-    const employer = await Employer.findById(employerId)
-      .populate({ path: "userId", select: "email" })
+    const employer = await Employer.findOne({ _id: employerId, isDeleted: false })
+      .populate({
+        path: "userId",
+        select: "email",
+        match: { isDeleted: false },
+        populate: { path: "profileId", select: "fullName", match: { isDeleted: false } },
+      })
       .lean();
     if (!employer) return res.status(404).json({ message: "Employer not found" });
     if (employer.roleType !== "Company Employer") return res.status(400).json({ message: "This endpoint is only for viewing Company Employers" });
@@ -84,6 +95,7 @@ exports.getCompanyEmployerApproval = async (req, res) => {
         employerId: employer._id,
         userId: employer.userId._id,
         email: employer.userId.email,
+        employeeName: employer.userId.profileId?.fullName || "Unknown",
         roleType: employer.roleType,
         companyId: employer.companyId,
         companyName: employer.companyName,
@@ -108,8 +120,13 @@ exports.approveCompanyEmployer = async (req, res) => {
     }
 
     const company = await checkCompanyExists(companyId);
-
-    const employer = await Employer.findById(employerId);
+    const employer = await Employer.findOne({ _id: employerId, isDeleted: false })
+      .populate({
+        path: "userId",
+        select: "email",
+        match: { isDeleted: false },
+        populate: { path: "profileId", select: "fullName", match: { isDeleted: false } },
+      });
     if (!employer) return res.status(404).json({ message: "Employer not found" });
     if (employer.roleType !== "Company Employer") return res.status(400).json({ message: "This endpoint is only for approving Company Employers" });
     if (employer.status !== "Pending") return res.status(400).json({ message: "Employer is not in a pending state" });
@@ -118,9 +135,9 @@ exports.approveCompanyEmployer = async (req, res) => {
     employer.status = "Active";
     await employer.save();
 
-    company.employees = company.employees || [];
-    if (!company.employees.some(id => id.toString() === employer.userId.toString())) {
-      company.employees.push(employer.userId);
+    company.companyEmployees = company.companyEmployees || [];
+    if (!company.companyEmployees.some(emp => emp.userId.toString() === employer.userId.toString())) {
+      company.companyEmployees.push({ userId: employer.userId });
       await company.save();
     }
 
@@ -134,7 +151,10 @@ exports.approveCompanyEmployer = async (req, res) => {
     res.status(200).json({
       message: "Company employer approved successfully",
       employer: {
-        userId: employer.userId,
+        employerId: employer._id,
+        userId: employer.userId._id,
+        email: employer.userId.email,
+        employeeName: employer.userId.profileId?.fullName || "Unknown",
         roleType: employer.roleType,
         companyId: employer.companyId,
         companyName: employer.companyName,
@@ -155,27 +175,34 @@ exports.getCompanyUsers = async (req, res) => {
     const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false }).select("companyId").lean();
     if (!companyAdmin) return res.status(404).json({ message: "Company admin not found" });
 
-    const company = await Company.findById(companyAdmin.companyId).select("employees").lean();
+    const company = await Company.findById(companyAdmin.companyId).select("companyEmployees").lean();
     if (!company) return res.status(404).json({ message: "Company not found" });
 
-    const users = await User.find({ _id: { $in: company.employees }, isDeleted: false })
+    const userIds = company.companyEmployees.map(emp => emp.userId);
+    const users = await User.find({ _id: { $in: userIds }, isDeleted: false })
       .select("_id email role")
+      .populate({ path: "profileId", select: "fullName", match: { isDeleted: false } })
       .skip((page - 1) * limit)
       .limit(parseInt(limit))
       .lean();
 
     const totalUsers = await User.countDocuments({
-      _id: { $in: company.employees },
+      _id: { $in: userIds },
       isDeleted: false,
     });
 
     res.status(200).json({
       message: "Company users retrieved successfully",
-      users: users.map(user => ({
-        userId: user._id,
-        email: user.email,
-        role: user.role,
-      })),
+      users: users.map(user => {
+        const employeeEntry = company.companyEmployees.find(emp => emp.userId.toString() === user._id.toString());
+        return {
+          employeeId: employeeEntry ? employeeEntry._id : null,
+          userId: user._id,
+          employeeName: user.profileId?.fullName || "Unknown",
+          email: user.email,
+          role: user.role,
+        };
+      }),
       page: parseInt(page),
       limit: parseInt(limit),
       total: totalUsers,
@@ -194,22 +221,26 @@ exports.getCompanyUser = async (req, res) => {
     const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false }).select("companyId").lean();
     if (!companyAdmin) return res.status(404).json({ message: "Company admin not found" });
 
-    const company = await Company.findById(companyAdmin.companyId).select("employees").lean();
-    if (!company || !company.employees.some(id => id.toString() === targetUserId)) {
+    const company = await Company.findById(companyAdmin.companyId).select("companyEmployees").lean();
+    if (!company || !company.companyEmployees.some(emp => emp.userId.toString() === targetUserId)) {
       return res.status(404).json({ message: "User not found in company" });
     }
 
     const user = await User.findById(targetUserId)
       .select("email role")
-      .populate({ path: "profileId", match: { isDeleted: false } })
+      .populate({ path: "profileId", select: "fullName", match: { isDeleted: false } })
       .populate({ path: "roleSpecificData", match: { isDeleted: false } })
       .lean();
     if (!user) return res.status(404).json({ message: "User not found" });
 
+    const employeeEntry = company.companyEmployees.find(emp => emp.userId.toString() === targetUserId);
+
     res.status(200).json({
       message: "Company user details retrieved successfully",
       user: {
+        employeeId: employeeEntry ? employeeEntry._id : null,
         userId: user._id,
+        employeeName: user.profileId?.fullName || "Unknown",
         email: user.email,
         role: user.role,
         profile: user.profileId || {},
@@ -230,14 +261,16 @@ exports.assignCompanyUserRole = async (req, res) => {
     const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false }).select("companyId").lean();
     if (!companyAdmin) return res.status(404).json({ message: "Company admin not found" });
 
-    const company = await Company.findById(companyAdmin.companyId).select("employees name").lean();
+    const company = await Company.findById(companyAdmin.companyId).select("companyEmployees name").lean();
     if (!company) return res.status(404).json({ message: "Company not found" });
 
-    if (!company.employees.some((id) => id.toString() === targetUserId.toString())) {
+    if (!company.companyEmployees.some(emp => emp.userId.toString() === targetUserId.toString())) {
       return res.status(404).json({ message: "Target user is not part of this company" });
     }
 
-    const targetUser = await User.findById(targetUserId).select("role");
+    const targetUser = await User.findOne({ _id: targetUserId, isDeleted: false })
+      .select("role")
+      .populate({ path: "profileId", select: "fullName", match: { isDeleted: false } });
     if (!targetUser) return res.status(404).json({ message: "Target user not found" });
 
     const validRoles = ["job_seeker", "employer"];
@@ -245,6 +278,36 @@ exports.assignCompanyUserRole = async (req, res) => {
 
     targetUser.role = newRole;
     await targetUser.save();
+
+    let employer;
+    if (newRole === "employer") {
+      employer = await Employer.findOne({ userId: targetUserId, isDeleted: false });
+      if (!employer) {
+        employer = new Employer({
+          userId: targetUserId,
+          roleType: "Company Employer",
+          companyId: companyAdmin.companyId,
+          companyName: company.name,
+          status: "Active",
+        });
+        await employer.save();
+      } else {
+        employer.roleType = "Company Employer";
+        employer.companyId = companyAdmin.companyId;
+        employer.companyName = company.name;
+        employer.status = "Active";
+        await employer.save();
+      }
+    } else {
+      employer = await Employer.findOne({ userId: targetUserId, isDeleted: false });
+      if (employer) {
+        employer.roleType = "Independent Recruiter";
+        employer.companyId = null;
+        employer.companyName = null;
+        employer.status = "Active";
+        await employer.save();
+      }
+    }
 
     await sendNotification({
       userId: targetUserId,
@@ -255,7 +318,11 @@ exports.assignCompanyUserRole = async (req, res) => {
 
     res.status(200).json({
       message: "Company user role assigned successfully",
-      user: { userId: targetUserId, role: newRole },
+      user: {
+        userId: targetUserId,
+        employeeName: targetUser.profileId?.fullName || "Unknown",
+        role: newRole,
+      },
     });
   } catch (error) {
     logger.error(`Error assigning company user role: ${error.message}`);
@@ -271,17 +338,19 @@ exports.fireEmployer = async (req, res) => {
     const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false }).select("companyId").lean();
     if (!companyAdmin) return res.status(404).json({ message: "Company admin not found" });
 
-    const company = await Company.findById(companyAdmin.companyId).select("employees name");
+    const company = await Company.findById(companyAdmin.companyId).select("companyEmployees name");
     if (!company) return res.status(404).json({ message: "Company not found" });
 
-    const targetUser = await User.findById(targetUserId).select("role");
+    const targetUser = await User.findOne({ _id: targetUserId, isDeleted: false })
+      .select("role")
+      .populate({ path: "profileId", select: "fullName", match: { isDeleted: false } });
     if (!targetUser) return res.status(404).json({ message: "Target user not found" });
     if (targetUser.role !== "employer") return res.status(400).json({ message: "Target user is not an employer" });
 
-    const employeeIndex = company.employees.findIndex((id) => id.toString() === targetUserId.toString());
+    const employeeIndex = company.companyEmployees.findIndex(emp => emp.userId.toString() === targetUserId.toString());
     if (employeeIndex === -1) return res.status(400).json({ message: "Target user is not part of this company" });
 
-    company.employees.splice(employeeIndex, 1);
+    company.companyEmployees.splice(employeeIndex, 1);
     await company.save();
 
     targetUser.role = "job_seeker";
@@ -292,6 +361,7 @@ exports.fireEmployer = async (req, res) => {
       employerProfile.roleType = "Independent Recruiter";
       employerProfile.companyId = null;
       employerProfile.companyName = null;
+      employerProfile.status = "Active";
       await employerProfile.save();
     }
 
@@ -304,7 +374,11 @@ exports.fireEmployer = async (req, res) => {
 
     res.status(200).json({
       message: "Employer fired successfully",
-      user: { userId: targetUserId, role: targetUser.role },
+      user: {
+        userId: targetUserId,
+        employeeName: targetUser.profileId?.fullName || "Unknown",
+        role: targetUser.role,
+      },
     });
   } catch (error) {
     logger.error(`Error firing employer: ${error.message}`);
@@ -328,7 +402,7 @@ exports.createCompanyJob = async (req, res) => {
     const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false }).select("companyId").lean();
     if (!companyAdmin) return res.status(404).json({ message: "Company admin not found" });
 
-    const company = await Company.findById(companyAdmin.companyId).select("jobListings employees name");
+    const company = await Company.findById(companyAdmin.companyId).select("jobListings companyEmployees name");
     if (!company) return res.status(404).json({ message: "Company not found" });
 
     const newJob = new Job({
@@ -347,11 +421,12 @@ exports.createCompanyJob = async (req, res) => {
     });
     await newJob.save();
 
-    company.jobListings.push(newJob._id);
+    company.jobListings.push({ jobId: newJob._id });
     await company.save();
 
+    const employeeIds = company.companyEmployees.map(emp => emp.userId);
     await sendNotificationsToUsers({
-      userIds: company.employees,
+      userIds: employeeIds,
       type: "newJob",
       relatedId: newJob._id,
       message: `A new job "${title}" has been posted at ${company.name}.`,
@@ -462,9 +537,10 @@ exports.updateCompanyJob = async (req, res) => {
     });
     await job.save();
 
-    const company = await Company.findById(companyAdmin.companyId).select("employees name");
+    const company = await Company.findById(companyAdmin.companyId).select("companyEmployees name");
+    const employeeIds = company.companyEmployees.map(emp => emp.userId);
     await sendNotificationsToUsers({
-      userIds: company.employees,
+      userIds: employeeIds,
       type: "newJob",
       relatedId: job._id,
       message: `The job "${job.title}" has been updated at ${company.name}.`,
@@ -502,12 +578,13 @@ exports.deleteCompanyJob = async (req, res) => {
 
     await job.softDelete();
 
-    const company = await Company.findById(companyAdmin.companyId).select("jobListings employees name");
-    company.jobListings = company.jobListings.filter(id => id.toString() !== jobId.toString());
+    const company = await Company.findById(companyAdmin.companyId).select("jobListings companyEmployees name");
+    company.jobListings = company.jobListings.filter(item => item.jobId.toString() !== jobId.toString());
     await company.save();
 
+    const employeeIds = company.companyEmployees.map(emp => emp.userId);
     await sendNotificationsToUsers({
-      userIds: company.employees,
+      userIds: employeeIds,
       type: "newJob",
       relatedId: job._id,
       message: `The job "${job.title}" has been deleted from ${company.name}.`,
@@ -529,37 +606,211 @@ exports.getCompanyReports = async (req, res) => {
     const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false }).select("companyId").lean();
     if (!companyAdmin) return res.status(404).json({ message: "Company admin not found" });
 
-    const company = await Company.findById(companyAdmin.companyId).select("employees jobListings").lean();
+    const company = await Company.findById(companyAdmin.companyId).select("companyEmployees jobListings name").lean();
     if (!company) return res.status(404).json({ message: "Company not found" });
 
-    const totalEmployees = company.employees.length;
+    const totalEmployees = company.companyEmployees.length;
 
-    const stats = await Job.aggregate([
+    // Fetch employee names and employer details
+    const userIds = company.companyEmployees.map(emp => emp.userId);
+    const users = await User.find({ _id: { $in: userIds }, isDeleted: false })
+      .select("_id")
+      .populate({ path: "profileId", select: "fullName", match: { isDeleted: false } })
+      .lean();
+
+    const employeeDetails = await Promise.all(
+      company.companyEmployees.map(async (emp) => {
+        const user = users.find(u => u._id.toString() === emp.userId.toString());
+        let employer = await Employer.findOne({ userId: emp.userId, isDeleted: false }).lean();
+        if (!employer && user?.role === "employer") {
+          employer = new Employer({
+            userId: emp.userId,
+            roleType: "Company Employer",
+            companyId: companyAdmin.companyId,
+            companyName: company.name,
+            status: "Active",
+          });
+          await employer.save();
+          logger.info(`Created missing Employer document for userId: ${emp.userId}`);
+        }
+        return {
+          employeeId: emp._id,
+          userId: emp.userId,
+          employeeName: user?.profileId?.fullName || "Unknown",
+          employerStatus: employer?.status || "N/A",
+        };
+      })
+    );
+
+    // Employer Statistics
+    const employerStats = await Employer.aggregate([
+      {
+        $match: {
+          companyId: new mongoose.Types.ObjectId(companyAdmin.companyId),
+          roleType: "Company Employer",
+          isDeleted: false,
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "userId",
+          foreignField: "_id",
+          as: "user",
+          pipeline: [
+            { $match: { isDeleted: false } },
+            {
+              $lookup: {
+                from: "userprofiles",
+                localField: "profileId",
+                foreignField: "_id",
+                as: "profile",
+                pipeline: [{ $match: { isDeleted: false } }],
+              },
+            },
+            { $unwind: { path: "$profile", preserveNullAndEmptyArrays: true } },
+          ],
+        },
+      },
+      { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
+      {
+        $facet: {
+          employerStatus: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
+          totalEmployers: [{ $count: "count" }],
+          employerDetails: [
+            {
+              $project: {
+                employerId: "$_id",
+                userId: "$userId",
+                employeeName: "$user.profile.fullName",
+                status: "$status",
+              },
+            },
+          ],
+          tenureStats: [
+            { $unwind: { path: "$hiredCandidates", preserveNullAndEmptyArrays: true } },
+            {
+              $group: {
+                _id: null,
+                totalHires: { $sum: { $cond: [{ $ifNull: ["$hiredCandidates.hiredAt", false] }, 1, 0] } },
+                totalTenureDays: {
+                  $sum: {
+                    $cond: [
+                      { $ifNull: ["$hiredCandidates.hiredAt", false] },
+                      { $divide: [{ $subtract: [new Date(), "$hiredCandidates.hiredAt"] }, 1000 * 60 * 60 * 24] },
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            {
+              $project: {
+                averageTenureDays: { $cond: [{ $eq: ["$totalHires", 0] }, 0, { $divide: ["$totalTenureDays", "$totalHires"] }] },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const totalEmployers = employerStats[0]?.totalEmployers[0]?.count || 0;
+    const employerStatus = employerStats[0]?.employerStatus?.reduce((acc, stat) => ({ ...acc, [stat._id]: stat.count }), {}) || {};
+    const employerDetails = employerStats[0]?.employerDetails || [];
+    const averageTenureDays = employerStats[0]?.tenureStats[0]?.averageTenureDays || 0;
+
+    // Job Statistics
+    const jobStats = await Job.aggregate([
       { $match: { companyId: new mongoose.Types.ObjectId(companyAdmin.companyId), isDeleted: false } },
       {
         $facet: {
-          jobStats: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
+          jobStatus: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
           applicationStats: [
             { $unwind: { path: "$applicants", preserveNullAndEmptyArrays: true } },
             { $match: { "applicants": { $exists: true } } },
             { $group: { _id: "$status", totalApplications: { $sum: 1 } } },
           ],
           totalJobs: [{ $count: "count" }],
+          salaryStats: [
+            {
+              $group: {
+                _id: null,
+                totalSalary: { $sum: "$salary" },
+                jobCount: { $sum: 1 },
+              },
+            },
+            {
+              $project: {
+                averageSalary: { $cond: [{ $eq: ["$jobCount", 0] }, 0, { $divide: ["$totalSalary", "$jobCount"] }] },
+              },
+            },
+          ],
+          experienceLevelStats: [{ $group: { _id: "$experienceLevel", count: { $sum: 1 } } }],
+          jobTypeStats: [{ $group: { _id: "$jobType", count: { $sum: 1 } } }],
+          jobsPerMonth: [
+            {
+              $group: {
+                _id: {
+                  year: { $year: "$createdAt" },
+                  month: { $month: "$createdAt" },
+                },
+                count: { $sum: 1 },
+              },
+            },
+            {
+              $sort: { "_id.year": 1, "_id.month": 1 },
+            },
+            {
+              $project: {
+                period: {
+                  $concat: [
+                    { $toString: "$_id.year" },
+                    "-",
+                    { $toString: "$_id.month" },
+                  ],
+                },
+                count: 1,
+                _id: 0,
+              },
+            },
+          ],
         },
       },
     ]);
 
-    const totalJobs = stats[0].totalJobs[0]?.count || 0;
-    const jobStats = stats[0].jobStats.reduce((acc, stat) => ({ ...acc, [stat._id]: stat.count }), {});
-    const applicationStats = stats[0].applicationStats.reduce((acc, stat) => ({ ...acc, [stat._id]: stat.totalApplications }), {});
+    const totalJobs = jobStats[0]?.totalJobs[0]?.count || 0;
+    const jobStatus = jobStats[0]?.jobStatus?.reduce((acc, stat) => ({ ...acc, [stat._id]: stat.count }), {}) || {};
+    const applicationStats = jobStats[0]?.applicationStats?.reduce((acc, stat) => ({ ...acc, [stat._id]: stat.totalApplications }), {}) || {};
+    const averageSalary = jobStats[0]?.salaryStats[0]?.averageSalary || 0;
+    const experienceLevelStats = jobStats[0]?.experienceLevelStats?.reduce((acc, stat) => ({ ...acc, [stat._id]: stat.count }), {}) || {};
+    const jobTypeStats = jobStats[0]?.jobTypeStats?.reduce((acc, stat) => ({ ...acc, [stat._id]: stat.count }), {}) || {};
+    const jobsPerMonth = jobStats[0]?.jobsPerMonth?.reduce((acc, stat) => ({ ...acc, [stat.period]: stat.count }), {}) || {};
 
     res.status(200).json({
       message: "Company reports retrieved successfully",
       reports: {
         totalEmployees,
-        totalJobs,
-        jobStats,
-        applicationStats,
+        employeeDetails,
+        employerStats: {
+          totalEmployers,
+          employerStatus,
+          employerDetails: employerDetails.map(detail => ({
+            employerId: detail.employerId,
+            userId: detail.userId,
+            employeeName: detail.employeeName || "Unknown",
+            status: detail.status,
+          })),
+          averageTenureDays: Math.round(averageTenureDays),
+        },
+        jobStats: {
+          totalJobs,
+          jobStatus,
+          applicationStats,
+          averageSalary: Math.round(averageSalary),
+          experienceLevelStats,
+          jobTypeStats,
+          jobsPerMonth,
+        },
       },
     });
   } catch (error) {

@@ -11,25 +11,29 @@ exports.sendConnectionRequest = async (req, res) => {
     const { targetUserId } = req.params;
 
     if (userId.toString() === targetUserId.toString()) {
-      throw new Error("You cannot send a connection request to yourself");
+      const error = new Error("You cannot send a connection request to yourself");
+      error.status = 400;
+      throw error;
     }
 
     const user = await checkUserExists(userId);
     const targetUser = await checkUserExists(targetUserId);
 
     const userProfile = await UserProfile.findOne({ userId })
-      .select("connections connectionRequests fullName")
-      .lean();
+      .select("connections connectionRequests fullName");
     const targetProfile = await UserProfile.findOne({ userId: targetUserId })
-      .select("connections connectionRequests fullName")
-      .lean();
+      .select("connections connectionRequests fullName");
 
     if (!userProfile || !targetProfile) {
-      throw new Error("User profile not found");
+      const error = new Error("User profile not found");
+      error.status = 404;
+      throw error;
     }
 
-    if (userProfile.connections.includes(targetUserId)) {
-      throw new Error("You are already connected with this user");
+    if (userProfile.connections.some((conn) => conn.toString() === targetUserId)) {
+      const error = new Error("You are already connected with this user");
+      error.status = 400;
+      throw error;
     }
 
     const mutualRequest = userProfile.connectionRequests.find(
@@ -41,11 +45,13 @@ exports.sendConnectionRequest = async (req, res) => {
         { userId },
         {
           $push: { connections: targetUserId },
-          $set: { "connectionRequests.$[req].status": "accepted" }
+          $pull: { connectionRequests: { fromUserId: targetUserId } },
         },
-        { arrayFilters: [{ "req.fromUserId": targetUserId }] }
       );
-      await UserProfile.updateOne({ userId: targetUserId }, { $push: { connections: userId } });
+      await UserProfile.updateOne(
+        { userId: targetUserId },
+        { $push: { connections: userId } },
+      );
 
       const userNotification = new Notification({
         userId: userId,
@@ -72,7 +78,9 @@ exports.sendConnectionRequest = async (req, res) => {
       (req) => req.fromUserId.toString() === userId.toString()
     );
     if (existingRequest) {
-      throw new Error("Connection request already sent");
+      const error = new Error("Connection request already sent");
+      error.status = 400;
+      throw error;
     }
 
     await UserProfile.updateOne(
@@ -104,32 +112,36 @@ exports.acceptConnectionRequest = async (req, res) => {
     const { requestUserId } = req.params;
 
     const userProfile = await UserProfile.findOne({ userId })
-      .select("connectionRequests fullName")
-      .lean();
+      .select("connectionRequests fullName");
     const requesterProfile = await UserProfile.findOne({ userId: requestUserId })
-      .select("fullName")
-      .lean();
+      .select("fullName");
 
     if (!userProfile || !requesterProfile) {
-      throw new Error("User profile not found");
+      const error = new Error("User profile not found");
+      error.status = 404;
+      throw error;
     }
 
-    const requestExists = userProfile.connectionRequests.some(
+    const requestExists = userProfile.connectionRequests.find(
       (req) => req.fromUserId.toString() === requestUserId.toString() && req.status === "pending"
     );
     if (!requestExists) {
-      throw new Error("No pending connection request found");
+      const error = new Error("No pending connection request found");
+      error.status = 400;
+      throw error;
     }
 
     await UserProfile.updateOne(
       { userId },
       {
         $push: { connections: requestUserId },
-        $set: { "connectionRequests.$[req].status": "accepted" }
+        $pull: { connectionRequests: { fromUserId: requestUserId } },
       },
-      { arrayFilters: [{ "req.fromUserId": requestUserId }] }
     );
-    await UserProfile.updateOne({ userId: requestUserId }, { $push: { connections: userId } });
+    await UserProfile.updateOne(
+      { userId: requestUserId },
+      { $push: { connections: userId } },
+    );
 
     const notification = new Notification({
       userId: requestUserId,
@@ -186,23 +198,41 @@ exports.rejectConnectionRequest = async (req, res) => {
 exports.removeConnection = async (req, res) => {
   try {
     const { userId } = req.user;
-    const { connectionId } = req.params;
+    const { targetUserId } = req.params;
 
-    const userProfile = await UserProfile.findOne({ userId }).select("connections").lean();
-    const connectionProfile = await UserProfile.findOne({ userId: connectionId })
-      .select("connections")
-      .lean();
+    const userProfile = await UserProfile.findOne({ userId }).select("connections");
+    if (!userProfile) {
+      const error = new Error("Current user profile not found");
+      error.status = 404;
+      throw error;
+    }
 
-    if (!userProfile || !connectionProfile) {
-      throw new Error("User profile not found");
+    const targetProfile = await UserProfile.findOne({ userId: targetUserId }).select("connections");
+    if (!targetProfile) {
+      const error = new Error("Target user profile not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const userHasConnection = userProfile.connections.some(
+      (connection) => connection.toString() === targetUserId
+    );
+    const targetHasConnection = targetProfile.connections.some(
+      (connection) => connection.toString() === userId
+    );
+
+    if (!userHasConnection || !targetHasConnection) {
+      const error = new Error("Connection not found between the users");
+      error.status = 400;
+      throw error;
     }
 
     await UserProfile.updateOne(
       { userId },
-      { $pull: { connections: connectionId } }
+      { $pull: { connections: targetUserId } }
     );
     await UserProfile.updateOne(
-      { userId: connectionId },
+      { userId: targetUserId },
       { $pull: { connections: userId } }
     );
 
@@ -224,26 +254,42 @@ exports.getConnections = async (req, res) => {
       .select("connections")
       .populate({
         path: "connections",
-        select: "userId fullName location.city",
-        populate: { path: "userId", select: "email role" },
-        match: { isDeleted: false }
+        select: "email role",
+        match: { isDeleted: false },
       })
       .lean();
 
     if (!userProfile) {
-      throw new Error("User profile not found");
+      const error = new Error("User profile not found");
+      error.status = 404;
+      throw error;
     }
 
-    const total = userProfile.connections.length;
+    const connectionIds = userProfile.connections.map((connection) => connection._id);
+
+    const connectionProfiles = await UserProfile.find({
+      userId: { $in: connectionIds },
+      isDeleted: false,
+    })
+      .select("userId fullName profilePicture")
+      .lean();
+
     const paginatedConnections = userProfile.connections
       .slice((page - 1) * limit, page * limit)
-      .map(connection => ({
-        userId: connection.userId._id,
-        fullName: connection.fullName || "Unnamed User",
-        email: connection.userId.email || "Not provided",
-        role: connection.userId.role || "Unknown",
-        city: connection.location?.city || "Unknown",
-      }));
+      .map((connection) => {
+        const profile = connectionProfiles.find(
+          (p) => p.userId.toString() === connection._id.toString()
+        );
+        return {
+          userId: connection._id,
+          fullName: profile?.fullName || "Unnamed User",
+          email: connection.email || "Not provided",
+          role: connection.role || "Unknown",
+          profilePicture: profile?.profilePicture || null,
+        };
+      });
+
+    const total = userProfile.connections.length;
 
     res.status(200).json({
       message: "Connections retrieved successfully",
@@ -277,12 +323,11 @@ exports.getConnectionRequests = async (req, res) => {
     }
 
     const filteredRequests = userProfile.connectionRequests.filter(
-      req => req.status === status
+      (req) => req.status === status
     );
 
     const total = filteredRequests.length;
-    const paginatedRequests = filteredRequests
-      .slice((page - 1) * limit, page * limit);
+    const paginatedRequests = filteredRequests.slice((page - 1) * limit, page * limit);
 
     const populatedRequests = await Promise.all(
       paginatedRequests.map(async (request) => {
@@ -328,8 +373,8 @@ exports.getFollowedCompanies = async (req, res) => {
       .select("followedCompanies")
       .populate({
         path: "followedCompanies",
-        select: "name industry location.city",
-        match: { isDeleted: false }
+        select: "name industry location.city followers",
+        match: { isDeleted: false },
       })
       .lean();
 
@@ -340,11 +385,12 @@ exports.getFollowedCompanies = async (req, res) => {
     const total = userProfile.followedCompanies.length;
     const paginatedCompanies = userProfile.followedCompanies
       .slice((page - 1) * limit, page * limit)
-      .map(company => ({
+      .map((company) => ({
         companyId: company._id,
         name: company.name || "Unnamed Company",
         industry: company.industry || "Unknown",
         city: company.location?.city || "Unknown",
+        followerCount: company.followers ? company.followers.length : 0,
       }));
 
     res.status(200).json({
@@ -372,13 +418,12 @@ exports.followCompany = async (req, res) => {
 
     const userProfile = await UserProfile.findOne({ userId })
       .select("followedCompanies")
-      .lean();
     if (!userProfile) {
       throw new Error("User profile not found");
     }
 
-    const company = await Company.findById(companyId).lean();
-    if (!company) {
+    const company = await Company.findById(companyId);
+    if (!company || company.isDeleted) {
       throw new Error("Company not found");
     }
 
@@ -386,7 +431,14 @@ exports.followCompany = async (req, res) => {
       throw new Error("You are already following this company");
     }
 
-    await UserProfile.updateOne({ userId }, { $push: { followedCompanies: companyId } });
+    await UserProfile.updateOne(
+      { userId },
+      { $push: { followedCompanies: companyId } }
+    );
+    await Company.updateOne(
+      { _id: companyId },
+      { $push: { followers: { userId } } }
+    );
 
     res.status(200).json({ message: "Company followed successfully" });
   } catch (error) {
@@ -404,14 +456,21 @@ exports.unfollowCompany = async (req, res) => {
 
     const userProfile = await UserProfile.findOne({ userId })
       .select("followedCompanies")
-      .lean();
     if (!userProfile) {
       throw new Error("User profile not found");
+    }
+
+    if (!userProfile.followedCompanies.includes(companyId)) {
+      throw new Error("You are not following this company");
     }
 
     await UserProfile.updateOne(
       { userId },
       { $pull: { followedCompanies: companyId } }
+    );
+    await Company.updateOne(
+      { _id: companyId },
+      { $pull: { followers: { userId } } }
     );
 
     res.status(200).json({ message: "Company unfollowed successfully" });

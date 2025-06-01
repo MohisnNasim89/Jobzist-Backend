@@ -1,5 +1,4 @@
 const mongoose = require("mongoose");
-const { applySoftDelete } = require("../../utils/softDelete");
 
 const commentSchema = new mongoose.Schema(
   {
@@ -18,6 +17,7 @@ const tagSchema = new mongoose.Schema({
 const mediaSchema = new mongoose.Schema({
   type: { type: String, enum: ["image", "video"], required: true },
   url: { type: String, required: true },
+  publicId: { type: String, required: true },
 });
 
 const postSchema = new mongoose.Schema(
@@ -47,7 +47,5 @@ const postSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
-applySoftDelete(postSchema);
 
 module.exports = mongoose.model("Post", postSchema);

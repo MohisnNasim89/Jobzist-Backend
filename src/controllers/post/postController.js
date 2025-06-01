@@ -1,6 +1,7 @@
 const Post = require("../../models/post/Posts");
 const Notification = require("../../models/notification/Notification");
 const UserProfile = require("../../models/user/UserProfile");
+const cloudinary = require("cloudinary").v2;
 const logger = require("../../utils/logger");
 const {
   checkPostExists,
@@ -15,11 +16,11 @@ exports.createPost = async (req, res) => {
     const { userId } = req.user;
     const { content, visibility, tags } = req.body;
 
-    await checkUserExists(userId).lean();
+    await checkUserExists(userId);
 
     if (tags && tags.length > 0) {
       for (const tag of tags) {
-        await checkUserOrCompanyExists(tag.type, tag.id).lean();
+        await checkUserOrCompanyExists(tag.type, tag.id);
       }
     }
 
@@ -37,6 +38,7 @@ exports.createPost = async (req, res) => {
         return {
           type: fileType,
           url: file.path,
+          publicId: file.publicId,
         };
       });
     }
@@ -79,11 +81,17 @@ exports.getPost = async (req, res) => {
     const { postId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId)
+    const post = await Post.findById(postId)
       .select("userId content visibility tags media createdAt likes comments shares saves")
       .populate("userId", "email role")
       .populate("tags.id", "name")
       .lean();
+
+    if (!post) {
+      const error = new Error("Post not found");
+      error.status = 404;
+      throw error;
+    }
 
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
@@ -119,9 +127,9 @@ exports.getUserPosts = async (req, res) => {
     const authenticatedUserId = req.user.userId;
     const { page = 1, limit = 10 } = req.query;
 
-    await checkUserExists(userId).lean();
+    await checkUserExists(userId);
 
-    const query = { userId, isDeleted: false };
+    const query = { userId };
     if (userId.toString() !== authenticatedUserId.toString()) {
       query.visibility = "public";
     }
@@ -157,12 +165,12 @@ exports.updatePost = async (req, res) => {
     const { userId } = req.user;
     const updates = req.body;
 
-    const post = await checkPostExists(postId).lean();
+    const post = await checkPostExists(postId);
     checkPostOwnership(post, userId);
 
     if (updates.tags && updates.tags.length > 0) {
       for (const tag of updates.tags) {
-        await checkUserOrCompanyExists(tag.type, tag.id).lean();
+        await checkUserOrCompanyExists(tag.type, tag.id);
       }
     }
 
@@ -174,13 +182,15 @@ exports.updatePost = async (req, res) => {
     });
 
     if (req.files && req.files.length > 0) {
-      post.media = req.files.map((file) => {
+      const newMedia = req.files.map((file) => {
         const fileType = file.mimetype.startsWith("image/") ? "image" : "video";
         return {
           type: fileType,
           url: file.path,
+          publicId: file.publicId,
         };
       });
+      post.media = [...post.media, ...newMedia]; // Append new media to existing media array
     }
 
     await Post.findByIdAndUpdate(postId, post);
@@ -202,10 +212,31 @@ exports.deletePost = async (req, res) => {
     const { postId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId).lean();
+    const post = await checkPostExists(postId);
     checkPostOwnership(post, userId);
 
-    await Post.findByIdAndUpdate(postId, { isDeleted: true }); // Assuming softDelete sets isDeleted
+    if (post.media && post.media.length > 0) {
+      const publicIds = post.media.map((mediaItem) => {
+        const folder = mediaItem.type === "image" ? "posts/images" : "posts/videos";
+        return `${folder}/${mediaItem.publicId}`;
+      });
+
+      logger.info(`Public IDs to delete: ${JSON.stringify(publicIds)}`);
+
+      for (const publicId of publicIds) {
+        try {
+          const resourceType = publicId.includes("posts/videos") ? "video" : "image";
+          const result = await cloudinary.uploader.destroy(publicId, {
+            resource_type: resourceType,
+          });
+          logger.info(`Deleted media ${publicId} from Cloudinary: ${JSON.stringify(result)}`);
+        } catch (cloudinaryError) {
+          logger.error(`Failed to delete media ${publicId} from Cloudinary: ${cloudinaryError.message}`);
+        }
+      }
+    }
+
+    await Post.findByIdAndDelete(postId);
 
     return res.status(200).json({ message: "Post deleted successfully" });
   } catch (error) {
@@ -221,7 +252,7 @@ exports.likePost = async (req, res) => {
     const { postId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId).lean();
+    const post = await checkPostExists(postId);
 
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
@@ -267,7 +298,7 @@ exports.commentOnPost = async (req, res) => {
     const { userId } = req.user;
     const { content } = req.body;
 
-    const post = await checkPostExists(postId).lean();
+    const post = await checkPostExists(postId);
 
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
@@ -318,7 +349,7 @@ exports.deleteComment = async (req, res) => {
     const { postId, commentId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId).lean();
+    const post = await checkPostExists(postId);
 
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
@@ -358,7 +389,7 @@ exports.sharePost = async (req, res) => {
     const { postId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId).lean();
+    const post = await checkPostExists(postId);
 
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
@@ -402,7 +433,7 @@ exports.savePost = async (req, res) => {
     const { postId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId).lean();
+    const post = await checkPostExists(postId);
 
     if (post.visibility === "private" && post.userId.toString() !== userId.toString()) {
       throw new Error("Unauthorized: This post is private");
@@ -432,7 +463,7 @@ exports.togglePostVisibility = async (req, res) => {
     const { postId } = req.params;
     const { userId } = req.user;
 
-    const post = await checkPostExists(postId).lean();
+    const post = await checkPostExists(postId);
     checkPostOwnership(post, userId);
 
     const newVisibility = post.visibility === "public" ? "private" : "public";

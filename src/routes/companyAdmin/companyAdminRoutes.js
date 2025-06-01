@@ -21,16 +21,6 @@ router.put("/:companyId/assign-role", verifyToken, checkCompanyAdminPermissions(
 
 router.delete("/:companyId/fire-employers/:targetUserId", verifyToken, checkCompanyAdminPermissions("Fire Employers"), companyAdminController.fireEmployer);
 
-router.get("/:companyId/jobs", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.getCompanyJobs);
-
-router.get("/:companyId/jobs/:jobId", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.getCompanyJob);
-
-router.post("/:companyId/jobs", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.createCompanyJob);
-
-router.put("/:companyId/jobs/:jobId", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.updateCompanyJob);
-
-router.delete("/:companyId/jobs/:jobId", verifyToken, checkCompanyAdminPermissions("Manage Company Jobs"), companyAdminController.deleteCompanyJob);
-
 router.get("/:companyId/reports", verifyToken, checkCompanyAdminPermissions("View Company Reports"), companyAdminController.getCompanyReports);
 
 module.exports = router;

@@ -57,10 +57,6 @@ const resumeSchema = new mongoose.Schema(
       },
     ],
     skills: [{ type: String, required: true }],
-    uploadedResume: {
-      type: String,
-      default: null,
-    },
   },
   { timestamps: true }
 );

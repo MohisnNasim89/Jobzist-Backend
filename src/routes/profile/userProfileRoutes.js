@@ -6,8 +6,6 @@ const { updateUserProfile, deleteUser, getCurrentUser, createUserProfile, getUse
 
 const router = express.Router();
 
-
-router.post("/:userId/create", verifyToken, userIdValidationRules, validate, createUserProfile);
 router.get("/", getUsers);
 router.get("/:userId/profile", verifyToken, userIdValidationRules, validate, getCurrentUser);
 router.put("/:userId/update-profile", verifyToken, userIdValidationRules, updateProfileValidationRules, validate, updateUserProfile);

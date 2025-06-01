@@ -37,7 +37,7 @@ exports.register = async (req, res) => {
   try {
     const { email, password, role, fullName } = req.body;
     if (!email || !password || !role || !fullName) {
-      return res.status(400).json({ message: "All fields are required" });
+      return res.status(400).json({ message: "Email, password, role, and full name are required" });
     }
 
     const sanitizedEmail = sanitizeInput(email);
@@ -70,6 +70,9 @@ exports.register = async (req, res) => {
     const RoleModel = getRoleModel(sanitizedRole);
     const roleData = new RoleModel({ userId: newUser._id });
     await roleData.save();
+
+    newUser.roleSpecificData = roleData._id;
+    await newUser.save();
 
     const emailVerificationLink = await admin.auth().generateEmailVerificationLink(sanitizedEmail);
 
@@ -137,7 +140,7 @@ exports.login = async (req, res) => {
 
 exports.oauthLogin = async (req, res) => {
   try {
-    const { idToken } = req.body;
+    const { idToken, role } = req.body;
     if (!idToken) return res.status(400).json({ message: "ID token required" });
 
     const decodedToken = await admin.auth().verifyIdToken(idToken);
@@ -148,10 +151,17 @@ exports.oauthLogin = async (req, res) => {
       isNewUser = true;
       const sanitizedEmail = sanitizeInput(decodedToken.email);
       const sanitizedName = sanitizeInput(decodedToken.name || "Unknown");
+      const sanitizedRole = role ? sanitizeInput(role) : "job_seeker";
+
+      const validRoles = ["job_seeker", "employer", "company_admin"];
+      if (!validRoles.includes(sanitizedRole)) {
+        return res.status(400).json({ message: "Invalid role" });
+      }
+
       user = new User({
         authId: decodedToken.uid,
         email: sanitizedEmail,
-        role: "job_seeker",
+        role: sanitizedRole,
       });
       await user.save();
 
@@ -164,8 +174,12 @@ exports.oauthLogin = async (req, res) => {
       user.profileId = userProfile._id;
       await user.save();
 
-      const roleData = new JobSeeker({ userId: user._id });
+      const RoleModel = getRoleModel(sanitizedRole);
+      const roleData = new RoleModel({ userId: user._id });
       await roleData.save();
+
+      user.roleSpecificData = roleData._id;
+      await user.save();
     }
 
     user = await User.findOne({ authId: decodedToken.uid, isDeleted: false })
@@ -189,22 +203,34 @@ exports.oauthLogin = async (req, res) => {
 
 exports.forgotPassword = async (req, res) => {
   try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ message: "Email is required" });
+    const { email, newPassword } = req.body; 
+    if (!email || !newPassword) {
+      return res.status(400).json({ message: "Email and new password are required" });
+    }
 
     const sanitizedEmail = sanitizeInput(email);
+    const sanitizedNewPassword = sanitizeInput(newPassword);
 
     const user = await User.findOne({ email: sanitizedEmail, isDeleted: false }).lean();
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const resetLink = await admin.auth().generatePasswordResetLink(sanitizedEmail);
-    res.status(200).json({ message: "Password reset link sent", resetLink });
+    const userRecord = await admin.auth().getUserByEmail(sanitizedEmail);
+    await admin.auth().updateUser(userRecord.uid, { password: sanitizedNewPassword });
+
+    const hashedPassword = await bcrypt.hash(sanitizedNewPassword, 10);
+    await User.findOneAndUpdate(
+      { email: sanitizedEmail, isDeleted: false },
+      { password: hashedPassword },
+      { new: true }
+    );
+
+    res.status(200).json({ message: "Password updated successfully" });
   } catch (error) {
     logger.error(`Forgot Password Error: ${error.message}`);
     res.status(500).json({
-      message: "Error sending password reset link",
+      message: "Error updating password",
     });
   }
 };
@@ -212,7 +238,15 @@ exports.forgotPassword = async (req, res) => {
 exports.logout = async (req, res) => {
   try {
     const { userId } = req.user;
-    await admin.auth().revokeRefreshTokens(userId);
+    logger.info(`Attempting logout for userId: ${userId}`);
+
+    const user = await User.findOne({ _id: userId, isDeleted: false }).select("authId").lean();
+    if (!user || !user.authId) {
+      throw new Error("No user record corresponding to the provided identifier");
+    }
+
+    const firebaseUid = user.authId;
+    await admin.auth().revokeRefreshTokens(firebaseUid);
     res.status(200).json({ message: "Logout successful" });
   } catch (error) {
     logger.error(`Logout Error: ${error.message}`);

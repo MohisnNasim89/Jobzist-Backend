@@ -1,5 +1,7 @@
 const winston = require("winston");
 const DailyRotateFile = require("winston-daily-rotate-file");
+const fs = require("fs").promises;
+const path = require("path");
 
 const logger = winston.createLogger({
   level: process.env.NODE_ENV === "production" ? "info" : "debug",
@@ -32,5 +34,24 @@ if (process.env.NODE_ENV !== "production") {
     })
   );
 }
+
+logger.clearLogs = async () => {
+  try {
+    const logDir = path.join(__dirname, "..", "..", "logs");
+    const files = await fs.readdir(logDir);
+
+    for (const file of files) {
+      if (file.startsWith("error-") || file.startsWith("combined-")) {
+        const filePath = path.join(logDir, file);
+        await fs.unlink(filePath);
+        logger.info(`Cleared log file: ${file}`);
+      }
+    }
+    logger.info("All logs cleared successfully");
+  } catch (error) {
+    logger.error(`Error clearing logs: ${error.message}`);
+    throw error;
+  }
+};
 
 module.exports = logger;

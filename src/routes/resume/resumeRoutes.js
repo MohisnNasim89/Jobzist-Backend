@@ -7,11 +7,7 @@ const resumeController = require("../../controllers/resumeController/resume");
 
 router.post("/generate", aiRateLimiter, verifyToken, resumeController.generateResume);
 
-router.post("/upload", verifyToken, upload.single("resume"), resumeController.uploadResume);
-
 router.put("/edit", verifyToken, upload.single("resume"), resumeController.editResume);
-
-router.get("/", verifyToken, resumeController.getResumes);
 
 router.get("/me", verifyToken, resumeController.getResume);
 

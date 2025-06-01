@@ -171,13 +171,11 @@ exports.updateCompanyProfile = async (req, res) => {
 
     const company = await checkCompanyExists(companyId);
 
-    // Authorization check: Only the associated CompanyAdmin can update
     const companyAdmin = await CompanyAdmin.findOne({ userId, companyId, isDeleted: false });
     if (!companyAdmin) {
       throw new Error("Unauthorized: Only the company admin can update this profile");
     }
 
-    // Validate updates
     if (updates.location) {
       if (!updates.location.country || !updates.location.city || !updates.location.address) {
         throw new Error("Location must include country, city, and address");

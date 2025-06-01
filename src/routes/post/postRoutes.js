@@ -15,7 +15,7 @@ router.post("/", verifyToken, createPostValidationRules, validate, upload.array(
 
 router.get("/:postId", verifyToken, postIdValidationRules, validate, postController.getPost);
 
-router.get("/user/:userId", verifyToken, postIdValidationRules, validate, postController.getUserPosts);
+router.get("/user/:userId", verifyToken, validate, postController.getUserPosts);
 
 router.put("/:postId", verifyToken, postIdValidationRules, createPostValidationRules, validate, upload.array("media", 5), postController.updatePost);
 

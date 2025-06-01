@@ -9,106 +9,6 @@ const Notification = require("../../models/notification/Notification");
 const { checkUserExists, checkUserIdMatch, checkUserProfileExists, renderProfileWithFallback } = require("../../utils/checks");
 const { emitNotification } = require("../../socket/socket");
 
-exports.createUserProfile = async (req, res) => {
-  try {
-    const userId = req.params.userId;
-    const authenticatedUserId = req.user.userId;
-
-    checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only create a profile for yourself");
-    const user = await checkUserExists(userId);
-
-    let userProfile = await UserProfile.findOne({ userId, isDeleted: false })
-      .select("userId isDeleted")
-      .lean();
-    if (userProfile) {
-      throw new Error("User profile already exists. Use the update endpoint to modify it.");
-    }
-
-    const { fullName, roleType, companyId } = req.body;
-    if (!fullName) {
-      throw new Error("Full name is required to create a user profile");
-    }
-
-    userProfile = new UserProfile({
-      userId,
-      fullName,
-      bio: req.body.bio || "",
-      location: req.body.location || { country: "", city: "", address: "" },
-      phoneNumber: req.body.phoneNumber || "",
-      socialLinks: req.body.socialLinks || [],
-      profilePicture: req.body.profilePicture || "",
-    });
-    await userProfile.save();
-
-    await User.findByIdAndUpdate(userId, { profileId: userProfile._id });
-
-    const roleSpecificModels = {
-      job_seeker: JobSeeker,
-      employer: Employer,
-      company_admin: CompanyAdmin,
-    };
-
-    if (roleSpecificModels[user.role]) {
-      const RoleSpecificModel = roleSpecificModels[user.role];
-      let roleSpecificData = await RoleSpecificModel.findOne({ userId, isDeleted: false })
-        .select("userId isDeleted")
-        .lean();
-      if (!roleSpecificData) {
-        if (user.role === "employer") {
-          const employerData = { userId };
-          if (roleType === "Independent Recruiter") {
-            employerData.roleType = "Independent Recruiter";
-            employerData.status = "Active";
-          } else if (roleType === "Company Employer") {
-            if (!companyId) {
-              throw new Error("companyId is required for Company Employer");
-            }
-            const company = await Company.findById(companyId);
-            if (!company) throw new Error("Company not found");
-            employerData.roleType = "Company Employer";
-            employerData.companyId = companyId;
-            employerData.companyName = company.name;
-            employerData.status = "Pending";
-
-            const companyAdmins = await CompanyAdmin.find({ companyId, isDeleted: false }).select("userId");
-            const notification = new Notification({
-              userId: null, 
-              type: "employerApprovalRequest",
-              relatedId: userProfile._id,
-              message: `${fullName} has requested to join ${company.name} as a Company Employer (Pending Approval).`,
-            });
-            for (const admin of companyAdmins) {
-              const adminNotification = new Notification({
-                ...notification.toObject(),
-                userId: admin.userId,
-              });
-              await adminNotification.save();
-              emitNotification(admin.userId, adminNotification);
-            }
-          } else {
-            throw new Error("Invalid roleType for employer");
-          }
-          roleSpecificData = new RoleSpecificModel(employerData);
-        } else {
-          roleSpecificData = new RoleSpecificModel({ userId });
-        }
-        await roleSpecificData.save();
-        await User.findByIdAndUpdate(userId, { roleSpecificData: roleSpecificData._id });
-      }
-    }
-
-    return res.status(201).json({
-      message: "User profile created successfully",
-      userId: userId,
-    });
-  } catch (error) {
-    logger.error(`Error creating user profile: ${error.message}`);
-    res.status(error.status || 500).json({
-      message: error.message || "An error occurred while creating the user profile",
-    });
-  }
-};
-
 exports.getUsers = async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
@@ -188,11 +88,16 @@ exports.updateUserProfile = async (req, res) => {
 
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only update your own profile");
     const user = await checkUserExists(userId);
+    logger.info(`User found: ${userId}`);
 
     const updates = req.body;
+    logger.info(`Updates received: ${JSON.stringify(updates)}`);
+
     const role = user.role;
+    logger.info(`User role: ${role}`);
 
     const userProfile = await checkUserProfileExists(userId);
+    logger.info(`User profile found: ${JSON.stringify(userProfile)}`);
 
     const allowedProfileUpdates = [
       "fullName",
@@ -208,7 +113,12 @@ exports.updateUserProfile = async (req, res) => {
         profileUpdates[key] = updates[key];
       }
     });
-    await UserProfile.findByIdAndUpdate(userProfile._id, profileUpdates);
+
+    // Since userProfile is a plain object (from lean), use its _id for the update
+    if (Object.keys(profileUpdates).length > 0) {
+      await UserProfile.findByIdAndUpdate(userProfile._id, profileUpdates);
+      logger.info(`User profile updated for userId: ${userId}`);
+    }
 
     const roleSpecificModels = {
       job_seeker: {
@@ -240,21 +150,98 @@ exports.updateUserProfile = async (req, res) => {
 
     if (roleSpecificModels[role]) {
       const { model: RoleSpecificModel, allowedUpdates } = roleSpecificModels[role];
-      let roleSpecificData = await RoleSpecificModel.findOne({ userId, isDeleted: false })
-        .select("_id")
-        .lean();
+      let roleSpecificData = await RoleSpecificModel.findOne({ userId, isDeleted: false }).select("_id");
       if (!roleSpecificData) {
-        roleSpecificData = new RoleSpecificModel({ userId });
-      }
+        if (role === "employer") {
+          const { roleType, companyId } = updates;
+          const employerData = { userId };
+          if (roleType === "Independent Recruiter") {
+            employerData.roleType = "Independent Recruiter";
+            employerData.status = "Active";
+          } else if (roleType === "Company Employer") {
+            if (!companyId) {
+              throw new Error("companyId is required for Company Employer");
+            }
+            const company = await Company.findById(companyId);
+            if (!company) throw new Error("Company not found");
+            employerData.roleType = "Company Employer";
+            employerData.companyId = companyId;
+            employerData.companyName = company.name;
+            employerData.status = "Pending";
 
-      const roleSpecificUpdates = {};
-      Object.keys(updates).forEach((key) => {
-        if (allowedUpdates.includes(key)) {
-          roleSpecificUpdates[key] = updates[key];
+            const companyAdmins = await CompanyAdmin.find({ companyId, isDeleted: false }).select("userId");
+            const notification = new Notification({
+              userId: null,
+              type: "employerApprovalRequest",
+              relatedId: userProfile._id,
+              message: `${userProfile.fullName} has requested to join ${company.name} as a Company Employer (Pending Approval).`,
+            });
+            for (const admin of companyAdmins) {
+              const adminNotification = new Notification({
+                ...notification.toObject(),
+                userId: admin.userId,
+              });
+              await adminNotification.save();
+              emitNotification(admin.userId.toString(), adminNotification);
+            }
+          } else {
+            throw new Error("Invalid roleType for employer");
+          }
+          roleSpecificData = new RoleSpecificModel(employerData);
+        } else {
+          roleSpecificData = new RoleSpecificModel({ userId });
         }
-      });
+        await roleSpecificData.save();
+        await User.findByIdAndUpdate(userId, { roleSpecificData: roleSpecificData._id });
+        logger.info(`Role-specific data created for userId: ${userId}, role: ${role}`);
+      } else {
+        const roleSpecificUpdates = {};
+        Object.keys(updates).forEach((key) => {
+          if (allowedUpdates.includes(key)) {
+            roleSpecificUpdates[key] = updates[key];
+          }
+        });
+        if (role === "employer" && updates.roleType) {
+          if (updates.roleType === "Independent Recruiter") {
+            roleSpecificUpdates.roleType = "Independent Recruiter";
+            roleSpecificUpdates.status = "Active";
+            roleSpecificUpdates.companyId = null;
+            roleSpecificUpdates.companyName = null;
+          } else if (updates.roleType === "Company Employer") {
+            if (!updates.companyId) {
+              throw new Error("companyId is required for Company Employer");
+            }
+            const company = await Company.findById(updates.companyId);
+            if (!company) throw new Error("Company not found");
+            roleSpecificUpdates.roleType = "Company Employer";
+            roleSpecificUpdates.companyId = updates.companyId;
+            roleSpecificUpdates.companyName = company.name;
+            roleSpecificUpdates.status = "Pending";
 
-      await RoleSpecificModel.findByIdAndUpdate(roleSpecificData._id || roleSpecificData, roleSpecificUpdates);
+            const companyAdmins = await CompanyAdmin.find({ companyId: updates.companyId, isDeleted: false }).select("userId");
+            const notification = new Notification({
+              userId: null,
+              type: "employerApprovalRequest",
+              relatedId: userProfile._id,
+              message: `${userProfile.fullName} has requested to join ${company.name} as a Company Employer (Pending Approval).`,
+            });
+            for (const admin of companyAdmins) {
+              const adminNotification = new Notification({
+                ...notification.toObject(),
+                userId: admin.userId,
+              });
+              await adminNotification.save();
+              emitNotification(admin.userId.toString(), adminNotification);
+            }
+          } else {
+            throw new Error("Invalid roleType for employer");
+          }
+        }
+        if (Object.keys(roleSpecificUpdates).length > 0) {
+          await RoleSpecificModel.findByIdAndUpdate(roleSpecificData._id, roleSpecificUpdates);
+          logger.info(`Role-specific data updated for userId: ${userId}, role: ${role}`);
+        }
+      }
     }
 
     return res.status(200).json({

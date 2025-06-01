@@ -18,7 +18,11 @@ const jobListingSchema = new mongoose.Schema({
 
 const companyEmployeesSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-})
+});
+
+const companyFollowersSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+});
 
 const companySchema = new mongoose.Schema(
   {
@@ -30,7 +34,7 @@ const companySchema = new mongoose.Schema(
     companyAdmin: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "CompanyAdmin",
-      required: true
+      required: true,
     },
     companySize: {
       type: String,
@@ -42,6 +46,7 @@ const companySchema = new mongoose.Schema(
     logo: { type: String },
     jobListings: [jobListingSchema],
     companyEmployees: [companyEmployeesSchema],
+    followers: [companyFollowersSchema],
   },
   { timestamps: true }
 );
@@ -49,5 +54,6 @@ const companySchema = new mongoose.Schema(
 applySoftDelete(companySchema);
 
 companySchema.index({ "companyEmployees.userId": 1 });
+companySchema.index({ "followers.userId": 1 });
 
 module.exports = mongoose.model("Company", companySchema);

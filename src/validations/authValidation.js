@@ -13,7 +13,7 @@ const registerValidationRules = [
     .matches(/[!@#$%^&*]/)
     .withMessage("Password must contain at least one special character"),
   body("role")
-    .isIn(["job_seeker", "employer", "company_admin"])
+    .isIn(["job_seeker", "employer", "company_admin", "super_admin"])
     .withMessage("Invalid role"),
   body("fullName").notEmpty().withMessage("Full name is required").trim(),
 ];
@@ -24,11 +24,15 @@ const loginValidationRules = [
 ];
 
 const oauthValidationRules = [
-  body("provider")
-    .notEmpty()
-    .withMessage("OAuth provider is required")
-    .isIn(["google", "linkedin"])
-    .withMessage("Invalid OAuth provider"),
+  // body("provider")
+  //   .notEmpty()
+  //   .withMessage("OAuth provider is required")
+  //   .isIn(["google", "linkedin"])
+  //   .withMessage("Invalid OAuth provider"),
+  body("role")
+    .optional()
+    .isIn(["job_seeker", "employer", "company_admin"])
+    .withMessage("Invalid role. Must be one of: job_seeker, employer, company_admin, super_admin"),
   body("token").notEmpty().withMessage("OAuth token is required"),
 ];
 
