@@ -11,15 +11,16 @@ const { sendNotification, sendNotificationsToUsers } = require("../../utils/noti
 exports.getCompanyEmployerApprovalRequests = async (req, res) => {
   try {
     const { userId } = req.user;
+    const { companyId } = req.params;
     const { page = 1, limit = 10 } = req.query;
 
     const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false }).select("companyId").lean();
-    if (!companyAdmin) {
-      return res.status(404).json({ message: "Company admin not found" });
+    if (!companyAdmin || companyAdmin.companyId.toString() !== companyId) {
+      return res.status(403).json({ message: "Unauthorized: You can only view employers for your own company" });
     }
 
     const approvalRequests = await Employer.find({
-      companyId: companyAdmin.companyId,
+      companyId: companyId,
       roleType: "Company Employer",
       status: "Pending",
       isDeleted: false,
@@ -36,7 +37,7 @@ exports.getCompanyEmployerApprovalRequests = async (req, res) => {
       .lean();
 
     const totalRequests = await Employer.countDocuments({
-      companyId: companyAdmin.companyId,
+      companyId: companyId,
       roleType: "Company Employer",
       status: "Pending",
       isDeleted: false,
@@ -62,7 +63,7 @@ exports.getCompanyEmployerApprovalRequests = async (req, res) => {
     });
   } catch (error) {
     logger.error(`Error retrieving company employer approval requests: ${error.message}`);
-    res.status(error.status || 500).json({ message: error.message });
+    res.status(500).json({ message: error.message });
   }
 };
 
@@ -114,7 +115,7 @@ exports.approveCompanyEmployer = async (req, res) => {
     const { userId } = req.user;
     const { companyId, employerId } = req.params;
 
-    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false }).lean();
+    const companyAdmin = await CompanyAdmin.findOne({ userId, isDeleted: false }).select("companyId").lean();
     if (!companyAdmin || companyAdmin.companyId.toString() !== companyId) {
       return res.status(403).json({ message: "Unauthorized: You can only approve employers for your own company" });
     }
@@ -132,13 +133,33 @@ exports.approveCompanyEmployer = async (req, res) => {
     if (employer.status !== "Pending") return res.status(400).json({ message: "Employer is not in a pending state" });
     if (employer.companyId.toString() !== companyId) return res.status(400).json({ message: "Employer is not associated with this company" });
 
+    const user = await User.findById(employer.userId).select("role");
+    if (!user) return res.status(404).json({ message: "Associated user not found" });
+    if (user.role !== "employer") {
+      user.role = "employer";
+      await user.save();
+      logger.info(`Updated user ${employer.userId} role to employer`);
+    }
+
     employer.status = "Active";
     await employer.save();
+    logger.info(`Updated employer ${employerId} status to Active`);
 
-    company.companyEmployees = company.companyEmployees || [];
-    if (!company.companyEmployees.some(emp => emp.userId.toString() === employer.userId.toString())) {
-      company.companyEmployees.push({ userId: employer.userId });
-      await company.save();
+    const updateResult = await Company.findOneAndUpdate(
+      { _id: companyId, "companyEmployees.userId": { $ne: employer.userId } },
+      { $push: { companyEmployees: { userId: employer.userId, status: "Active" } } },
+      { new: true, runValidators: true }
+    );
+
+    if (updateResult) {
+      logger.info(`Added user ${employer.userId} to companyEmployees for company ${companyId} during approval`);
+    } else {
+      await Company.findOneAndUpdate(
+        { _id: companyId, "companyEmployees.userId": employer.userId },
+        { $set: { "companyEmployees.$[elem].status": "Active" } },
+        { arrayFilters: [{ "elem.userId": employer.userId }], new: true, runValidators: true }
+      );
+      logger.info(`Updated status to Active for user ${employer.userId} in companyEmployees for company ${companyId}`);
     }
 
     await sendNotification({
@@ -163,7 +184,9 @@ exports.approveCompanyEmployer = async (req, res) => {
     });
   } catch (error) {
     logger.error(`Error approving company employer: ${error.message}`);
-    res.status(error.status || 500).json({ message: error.message });
+    res.status(error.status || 500).json({
+      message: error.message || "An error occurred while approving the company employer",
+    });
   }
 };
 

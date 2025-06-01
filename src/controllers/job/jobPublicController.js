@@ -6,10 +6,7 @@ exports.getJob = async (req, res) => {
   try {
     const { jobId } = req.params;
 
-    const job = await checkJobExists(jobId)
-      .select("_id title companyId postedBy description location jobType salary requirements skills experienceLevel applicationDeadline status createdAt")
-      .populate({ path: "companyId", select: "name logo", match: { isDeleted: false } })
-      .lean();
+    const job = await checkJobExists(jobId);
 
     res.status(200).json({
       message: "Job retrieved successfully",
@@ -39,9 +36,10 @@ exports.getJob = async (req, res) => {
 
 exports.searchJobs = async (req, res) => {
   try {
-    const { jobType, experienceLevel, location, page = 1, limit = 10 } = req.query;
+    const { title, jobType, experienceLevel, location, page = 1, limit = 10 } = req.query;
 
     const query = { status: "Open", isDeleted: false };
+    if (title) query.title = { $regex: title, $options: "i" };
     if (jobType) query.jobType = jobType;
     if (experienceLevel) query.experienceLevel = experienceLevel;
     if (location) {
@@ -87,12 +85,12 @@ exports.getCompanyJobs = async (req, res) => {
     const { companyId } = req.params;
     const { page = 1, limit = 10 } = req.query;
 
-    await checkCompanyExists(companyId).lean();
+    await checkCompanyExists(companyId);
 
-    const query = { companyId, status: "Open", isDeleted: false };
+    const query = { companyId, status: "Open" };
     const jobs = await Job.find(query)
       .select("_id title companyId status")
-      .populate({ path: "companyId", select: "name logo", match: { isDeleted: false } })
+      .populate({ path: "companyId", select: "name logo" })
       .skip((page - 1) * limit)
       .limit(parseInt(limit))
       .lean();

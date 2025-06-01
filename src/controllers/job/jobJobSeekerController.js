@@ -13,7 +13,7 @@ exports.getATSScoreAndSuggestions = async (req, res) => {
     const { jobId } = req.params;
 
     checkRole(role, ["job_seeker"]);
-    const job = await checkJobExists(jobId).lean();
+    const job = await checkJobExists(jobId);
     const resume = await Resume.findOne({ userId }).lean();
     const jobSeeker = await checkJobSeekerExists(userId);
 
@@ -44,7 +44,7 @@ exports.generateCoverLetterForJob = async (req, res) => {
     const { jobId } = req.params;
 
     checkRole(role, ["job_seeker"]);
-    const job = await checkJobExists(jobId).lean();
+    const job = await checkJobExists(jobId);
     const resume = await Resume.findOne({ userId }).select("fullName contactInformation").lean();
     const jobSeeker = await checkJobSeekerExists(userId);
 

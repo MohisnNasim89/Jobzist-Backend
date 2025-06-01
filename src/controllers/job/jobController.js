@@ -50,9 +50,9 @@ exports.createJob = async (req, res) => {
     await job.save();
 
     if (companyId && company) {
-      company.jobListings.push(job._id);
-      await company.save();
-
+      await Company.findByIdAndUpdate(companyId, {
+        $addToSet: { jobListings: { jobId: job._id } }
+      });
       const followers = await UserProfile.find({ followedCompanies: companyId })
         .select("userId")
         .lean();
@@ -69,8 +69,7 @@ exports.createJob = async (req, res) => {
 
     if (role === "employer") {
       const employer = await checkEmployerExists(userId);
-      employer.jobListings.push(job._id);
-      await employer.save();
+      await Employer.findByIdAndUpdate(employer._id, { $addToSet: { jobListings: { jobId: job._id } } });
 
       const connections = await UserProfile.find({ connections: userId })
         .select("userId")
@@ -174,7 +173,7 @@ exports.deleteJob = async (req, res) => {
     const { jobId } = req.params;
     const { role, userId } = req.user;
 
-    const job = await checkJobExists(jobId).lean();
+    const job = await checkJobExists(jobId);
     checkRole(role, ["company_admin", "employer"], "Unauthorized: Only company admins and employers can delete jobs");
 
     if (role === "employer" && job.postedBy.toString() !== userId) {
@@ -190,16 +189,19 @@ exports.deleteJob = async (req, res) => {
 
     if (job.companyId) {
       const company = await checkCompanyExists(job.companyId);
-      company.jobListings = company.jobListings.filter(id => id.toString() !== jobId.toString());
+      company.jobListings = company.jobListings.filter(item => {
+        if (item.jobId) {
+          return item.jobId.toString() !== jobId.toString();
+        }
+        return item.toString() !== jobId.toString();
+      });
       await company.save();
     }
 
     if (role === "employer") {
       const employer = await checkEmployerExists(userId);
-      if (employer.roleType === "Company Employer") {
-        employer.jobListings = employer.jobListings.filter(id => id.toString() !== jobId.toString());
-        await employer.save();
-      }
+      employer.jobListings = employer.jobListings.filter(id => id.toString() !== jobId.toString());
+      await employer.save();
     }
 
     await JobSeeker.updateMany(
@@ -215,7 +217,23 @@ exports.deleteJob = async (req, res) => {
       { $pull: { jobOffers: { jobId } } }
     );
 
-    await Job.findById(jobId).then(job => job.softDelete());
+    await Job.findByIdAndUpdate(jobId, { isDeleted: true });
+
+    if (job.companyId) {
+      const company = await checkCompanyExists(job.companyId);
+      const followers = await UserProfile.find({ followedCompanies: job.companyId })
+        .select("userId")
+        .lean();
+      if (followers.length > 0) {
+        const followerIds = followers.map(f => f.userId);
+        await sendNotificationsToUsers({
+          userIds: followerIds,
+          type: "jobUpdate",
+          relatedId: job._id,
+          message: `${company.name} has removed the job: ${job.title}`,
+        });
+      }
+    }
 
     res.status(200).json({ message: "Job deleted successfully" });
   } catch (error) {
@@ -231,11 +249,17 @@ exports.hireCandidate = async (req, res) => {
     const { jobId, jobSeekerId } = req.params;
     const { userId, role } = req.user;
 
-    checkRole(role, ["employer"], "Unauthorized: Only employers can hire candidates");
+    checkRole(role, ["employer", "company_admin"], "Unauthorized: Only employers and company admins can hire candidates");
 
     const job = await checkJobExists(jobId);
-    if (job.postedBy.toString() !== userId) {
+    if (role === "employer" && job.postedBy.toString() !== userId) {
       throw new Error("Unauthorized: You can only hire for jobs you posted");
+    }
+    if (role === "company_admin") {
+      const companyAdmin = await checkCompanyAdminExists(userId);
+      if (job.companyId && companyAdmin.companyId.toString() !== job.companyId.toString()) {
+        throw new Error("Unauthorized: You can only hire for jobs in your company");
+      }
     }
 
     const jobSeeker = await JobSeeker.findOne({ userId: jobSeekerId, isDeleted: false });
@@ -248,15 +272,14 @@ exports.hireCandidate = async (req, res) => {
       throw new Error("This job seeker has not applied for the job");
     }
 
-    const employer = await checkEmployerExists(userId);
+    const employer = role === "employer" ? await checkEmployerExists(userId) : null;
 
-    const alreadyHired = employer.hiredCandidates.some(
+    const alreadyHired = (employer && employer.hiredCandidates.some(
+      (candidate) => candidate.jobSeekerId.toString() === jobSeekerId.toString()
+    )) || job.hiredCandidates.some(
       (candidate) => candidate.jobSeekerId.toString() === jobSeekerId.toString()
     );
-    const alreadyHiredInJob = job.hiredCandidates.some(
-      (candidate) => candidate.jobSeekerId.toString() === jobSeekerId.toString()
-    );
-    if (alreadyHired || alreadyHiredInJob) {
+    if (alreadyHired) {
       throw new Error("This candidate has already been hired");
     }
 
@@ -278,6 +301,10 @@ exports.hireCandidate = async (req, res) => {
     jobSeeker.jobOffers.push({ jobId });
     await job.save();
     await jobSeeker.save();
+
+    if (employer && employer.roleType === "Company Employer" && employer.companyId) {
+      await Employer.findByIdAndUpdate(employer._id, { $addToSet: { hiredCandidates: { jobSeekerId, jobId } } });
+    }
 
     await sendNotification({
       userId: jobSeeker.userId,
@@ -329,11 +356,15 @@ exports.toggleJobStatus = async (req, res) => {
           .lean();
         connectionIds = employerConnections.map(conn => conn.userId);
       }
-      if (company && companyId) {
-        const companyConnections = await UserProfile.find({ connections: { $in: companyAdminIds } })
+      if (company && company.companyAdmin) {
+        const companyAdmins = await CompanyAdmin.find({ companyId: job.companyId })
           .select("userId")
           .lean();
-        connectionIds = [...connectionIds, ...companyConnections.map(conn => conn.userId)];
+        const adminIds = companyAdmins.map(admin => admin.userId);
+        const companyConnections = await UserProfile.find({ connections: { $in: adminIds } })
+          .select("userId")
+          .lean();
+        connectionIds = [...new Set([...connectionIds, ...companyConnections.map(conn => conn.userId)])];
       }
 
       if (connectionIds.length > 0) {
@@ -381,11 +412,17 @@ exports.previewApplicantResume = async (req, res) => {
     const { jobId, jobSeekerId } = req.params;
     const { userId, role } = req.user;
 
-    checkRole(role, ["employer"], "Unauthorized: Only employers can preview resumes");
+    checkRole(role, ["employer", "company_admin"], "Unauthorized: Only employers and company admins can preview resumes");
 
-    const job = await checkJobExists(jobId).lean();
-    if (job.postedBy.toString() !== userId) {
+    const job = await checkJobExists(jobId);
+    if (role === "employer" && job.postedBy.toString() !== userId) {
       throw new Error("Unauthorized: You can only preview resumes for jobs you posted");
+    }
+    if (role === "company_admin") {
+      const companyAdmin = await checkCompanyAdminExists(userId);
+      if (job.companyId && companyAdmin.companyId.toString() !== job.companyId.toString()) {
+        throw new Error("Unauthorized: You can only preview resumes for jobs in your company");
+      }
     }
 
     const applicant = job.applicants.find((applicant) => applicant.userId.toString() === jobSeekerId.toString());
@@ -429,11 +466,17 @@ exports.downloadApplicantResume = async (req, res) => {
     const { jobId, jobSeekerId } = req.params;
     const { userId, role } = req.user;
 
-    checkRole(role, ["employer"], "Unauthorized: Only employers can download resumes");
+    checkRole(role, ["employer", "company_admin"], "Unauthorized: Only employers and company admins can download resumes");
 
-    const job = await checkJobExists(jobId).lean();
-    if (job.postedBy.toString() !== userId) {
+    const job = await checkJobExists(jobId);
+    if (role === "employer" && job.postedBy.toString() !== userId) {
       throw new Error("Unauthorized: You can only download resumes for jobs you posted");
+    }
+    if (role === "company_admin") {
+      const companyAdmin = await checkCompanyAdminExists(userId);
+      if (job.companyId && companyAdmin.companyId.toString() !== job.companyId.toString()) {
+        throw new Error("Unauthorized: You can only download resumes for jobs in your company");
+      }
     }
 
     const applicant = job.applicants.find((applicant) => applicant.userId.toString() === jobSeekerId.toString());
@@ -441,7 +484,7 @@ exports.downloadApplicantResume = async (req, res) => {
       throw new Error("This job seeker has not applied for the job");
     }
 
-    const resume = await Resume.findOne({ userId: jobSeekerId, isDeleted: false })
+    const resume = await Resume.findOne({ userId: jobSeekerId })
       .select("userId uploadedResume")
       .lean();
     if (!resume) {

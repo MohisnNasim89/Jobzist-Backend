@@ -88,16 +88,11 @@ exports.updateUserProfile = async (req, res) => {
 
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only update your own profile");
     const user = await checkUserExists(userId);
-    logger.info(`User found: ${userId}`);
 
     const updates = req.body;
-    logger.info(`Updates received: ${JSON.stringify(updates)}`);
-
     const role = user.role;
-    logger.info(`User role: ${role}`);
 
     const userProfile = await checkUserProfileExists(userId);
-    logger.info(`User profile found: ${JSON.stringify(userProfile)}`);
 
     const allowedProfileUpdates = [
       "fullName",
@@ -114,10 +109,9 @@ exports.updateUserProfile = async (req, res) => {
       }
     });
 
-    // Since userProfile is a plain object (from lean), use its _id for the update
     if (Object.keys(profileUpdates).length > 0) {
       await UserProfile.findByIdAndUpdate(userProfile._id, profileUpdates);
-      logger.info(`User profile updated for userId: ${userId}`);
+      logger.info(`Updated UserProfile for userId: ${userId}`);
     }
 
     const roleSpecificModels = {
@@ -150,7 +144,7 @@ exports.updateUserProfile = async (req, res) => {
 
     if (roleSpecificModels[role]) {
       const { model: RoleSpecificModel, allowedUpdates } = roleSpecificModels[role];
-      let roleSpecificData = await RoleSpecificModel.findOne({ userId, isDeleted: false }).select("_id");
+      let roleSpecificData = await RoleSpecificModel.findOne({ userId, isDeleted: false }).select("_id roleType companyId status");
       if (!roleSpecificData) {
         if (role === "employer") {
           const { roleType, companyId } = updates;
@@ -169,6 +163,13 @@ exports.updateUserProfile = async (req, res) => {
             employerData.companyName = company.name;
             employerData.status = "Pending";
 
+            // Add to companyEmployees if not already present
+            if (!company.companyEmployees.some(emp => emp.userId.toString() === userId.toString())) {
+              company.companyEmployees.push({ userId });
+              await company.save();
+              logger.info(`Added userId: ${userId} to companyEmployees for companyId: ${companyId}`);
+            }
+
             const companyAdmins = await CompanyAdmin.find({ companyId, isDeleted: false }).select("userId");
             const notification = new Notification({
               userId: null,
@@ -183,6 +184,7 @@ exports.updateUserProfile = async (req, res) => {
               });
               await adminNotification.save();
               emitNotification(admin.userId.toString(), adminNotification);
+              logger.info(`Sent employer approval request notification to admin userId: ${admin.userId}`);
             }
           } else {
             throw new Error("Invalid roleType for employer");
@@ -207,6 +209,16 @@ exports.updateUserProfile = async (req, res) => {
             roleSpecificUpdates.status = "Active";
             roleSpecificUpdates.companyId = null;
             roleSpecificUpdates.companyName = null;
+
+            // Remove from companyEmployees if previously a Company Employer
+            if (roleSpecificData.roleType === "Company Employer" && roleSpecificData.companyId) {
+              const company = await Company.findById(roleSpecificData.companyId);
+              if (company) {
+                company.companyEmployees = company.companyEmployees.filter(emp => emp.userId.toString() !== userId.toString());
+                await company.save();
+                logger.info(`Removed userId: ${userId} from companyEmployees for companyId: ${roleSpecificData.companyId}`);
+              }
+            }
           } else if (updates.roleType === "Company Employer") {
             if (!updates.companyId) {
               throw new Error("companyId is required for Company Employer");
@@ -217,6 +229,13 @@ exports.updateUserProfile = async (req, res) => {
             roleSpecificUpdates.companyId = updates.companyId;
             roleSpecificUpdates.companyName = company.name;
             roleSpecificUpdates.status = "Pending";
+
+            // Add to companyEmployees if not already present
+            if (!company.companyEmployees.some(emp => emp.userId.toString() === userId.toString())) {
+              company.companyEmployees.push({ userId });
+              await company.save();
+              logger.info(`Added userId: ${userId} to companyEmployees for companyId: ${updates.companyId}`);
+            }
 
             const companyAdmins = await CompanyAdmin.find({ companyId: updates.companyId, isDeleted: false }).select("userId");
             const notification = new Notification({
@@ -232,6 +251,7 @@ exports.updateUserProfile = async (req, res) => {
               });
               await adminNotification.save();
               emitNotification(admin.userId.toString(), adminNotification);
+              logger.info(`Sent employer approval request notification to admin userId: ${admin.userId}`);
             }
           } else {
             throw new Error("Invalid roleType for employer");
@@ -263,6 +283,17 @@ exports.deleteUser = async (req, res) => {
 
     checkUserIdMatch(userId, authenticatedUserId, "Unauthorized: You can only delete your own profile");
     const user = await checkUserExists(userId).lean();
+
+    // Remove user from companyEmployees if they are an employer
+    const employer = await Employer.findOne({ userId, isDeleted: false });
+    if (employer && employer.roleType === "Company Employer" && employer.companyId) {
+      const company = await Company.findById(employer.companyId);
+      if (company) {
+        company.companyEmployees = company.companyEmployees.filter(emp => emp.userId.toString() !== userId.toString());
+        await company.save();
+        logger.info(`Removed userId: ${userId} from companyEmployees for companyId: ${employer.companyId} due to user deletion`);
+      }
+    }
 
     await User.findByIdAndUpdate(userId, { isDeleted: true });
 
