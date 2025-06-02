@@ -1,0 +1,5 @@
+The one who is company employer how he create the profile and how it get linked with the company automatically 
+
+
+optimize all the controllers 
+implement notifications
