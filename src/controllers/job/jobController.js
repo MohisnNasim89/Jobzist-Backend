@@ -517,18 +517,6 @@ exports.getJobApplicants = async (req, res) => {
 
     const job = await Job.findOne({ _id: jobId, isDeleted: false })
       .select("applicants postedBy companyId")
-      .populate({
-        path: "applicants.userId",
-        model: "JobSeeker",
-        match: { isDeleted: false },
-        select: "userId fullName",
-        populate: {
-          path: "userId",
-          model: "User",
-          select: "email",
-          match: { isDeleted: false },
-        },
-      })
       .lean();
 
     if (!job) {
@@ -559,15 +547,43 @@ exports.getJobApplicants = async (req, res) => {
     const startIndex = (page - 1) * limit;
     const paginatedApplicants = job.applicants.slice(startIndex, startIndex + parseInt(limit));
 
-    const applicants = paginatedApplicants
-      .filter(applicant => applicant.userId)
-      .map((applicant) => ({
-        userId: applicant.userId._id,
-        fullName: applicant.userId?.fullName || "N/A",
-        email: applicant.userId?.userId?.email || "N/A",
+    const applicantUserIds = paginatedApplicants.map(app => app.userId);
+
+    const [userProfiles, jobSeekers] = await Promise.all([
+      require("../../models/user/UserProfile").find({ userId: { $in: applicantUserIds }, isDeleted: false })
+        .select("userId fullName")
+        .lean(),
+      JobSeeker.find({ userId: { $in: applicantUserIds }, isDeleted: false })
+        .select("userId")
+        .populate({
+          path: "userId",
+          model: "User",
+          select: "email"
+        })
+        .lean()
+    ]);
+
+    const userProfileMap = {};
+    userProfiles.forEach(up => {
+      userProfileMap[up.userId.toString()] = up;
+    });
+
+    const jobSeekerMap = {};
+    jobSeekers.forEach(js => {
+      jobSeekerMap[js.userId._id ? js.userId._id.toString() : js.userId.toString()] = js;
+    });
+
+    const applicants = paginatedApplicants.map((applicant) => {
+      const up = userProfileMap[applicant.userId.toString()];
+      const js = jobSeekerMap[applicant.userId.toString()];
+      return {
+        userId: applicant.userId,
+        fullName: up?.fullName || "N/A",
+        email: js?.userId?.email || "N/A",
         appliedAt: applicant.appliedAt,
         status: applicant.status,
-      }));
+      };
+    });
 
     res.status(200).json({
       message: "Job applicants retrieved successfully",
