@@ -56,12 +56,10 @@ app.use("/api/v1/resume", resumeRoutes);
 app.use("/api/v1/company-admin", companyAdminRoutes);
 app.use("/api/v1/super-admin", superAdminRoutes);
 
-// Root Route
 app.get("/", (req, res) => {
   res.send("Jobzist Backend is Running 🚀");
 });
 
-// 404 Handler for undefined routes
 app.use((req, res, next) => {
   res.status(404).json({ message: "Route not found" });
 });
