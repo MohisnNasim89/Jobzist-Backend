@@ -179,7 +179,7 @@ exports.generateCoverLetter = async (
       "body": ["...", "..."],
       "closing": {
         "callToAction": "...",
-        "signature": "..."
+        "signature": "...."
       }
     }
   }

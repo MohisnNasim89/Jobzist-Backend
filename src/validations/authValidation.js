@@ -24,11 +24,6 @@ const loginValidationRules = [
 ];
 
 const oauthValidationRules = [
-  // body("provider")
-  //   .notEmpty()
-  //   .withMessage("OAuth provider is required")
-  //   .isIn(["google", "linkedin"])
-  //   .withMessage("Invalid OAuth provider"),
   body("role")
     .optional()
     .isIn(["job_seeker", "employer", "company_admin"])
