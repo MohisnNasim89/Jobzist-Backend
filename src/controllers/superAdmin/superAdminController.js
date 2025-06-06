@@ -4,6 +4,8 @@ const Company = require("../../models/company/Company");
 const SuperAdmin = require("../../models/user/SuperAdmin");
 const CompanyAdmin = require("../../models/company/CompanyAdmin");
 const JobSeeker = require("../../models/user/JobSeeker");
+const Employer = require("../../models/user/Employer");
+const mongoose = require("mongoose");
 const logger = require("../../utils/logger");
 const { checkRole } = require("../../utils/checks");
 
@@ -255,8 +257,10 @@ exports.getSystemReports = async (req, res) => {
   try {
     const { userId, role } = req.user;
 
+    // Validate role
     checkRole(role, ["super_admin"], "Unauthorized: Only super admins can view system reports");
 
+    // Validate super admin
     const superAdmin = await SuperAdmin.findOne({ userId, isDeleted: false })
       .select("status permissions")
       .lean();
@@ -268,28 +272,151 @@ exports.getSystemReports = async (req, res) => {
       throw new Error("Failed to retrieve system reports: Permission denied");
     }
 
+    // Date ranges for time-based metrics
+    const now = new Date();
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // 7 days ago
+    const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
+
+    // Total counts
     const totalUsers = await User.countDocuments({ isDeleted: false });
     const totalJobs = await Job.countDocuments({ isDeleted: false });
     const totalCompanies = await Company.countDocuments({ isDeleted: false });
+    const totalEmployers = await Employer.countDocuments({ isDeleted: false });
+    const totalJobSeekers = await JobSeeker.countDocuments({ isDeleted: false });
 
+    // User statistics
     const userStats = await User.aggregate([
       { $match: { isDeleted: false } },
       { $group: { _id: "$role", count: { $sum: 1 } } },
     ]);
 
+    const recentRegistrations = await User.countDocuments({
+      isDeleted: false,
+      createdAt: { $gte: oneWeekAgo },
+    });
+
+    const deletedUsers = await User.countDocuments({ isDeleted: true });
+
+    // Job statistics
     const jobStats = await Job.aggregate([
       { $match: { isDeleted: false } },
       { $group: { _id: "$status", count: { $sum: 1 } } },
     ]);
 
+    const recentJobs = await Job.countDocuments({
+      isDeleted: false,
+      createdAt: { $gte: oneWeekAgo },
+    });
+
+    const totalApplications = await Job.aggregate([
+      { $match: { isDeleted: false } },
+      { $unwind: "$applicants" },
+      { $count: "total" },
+    ]);
+
+    const recentApplications = await Job.aggregate([
+      { $match: { isDeleted: false } },
+      { $unwind: "$applicants" },
+      { $match: { "applicants.appliedAt": { $gte: oneWeekAgo } } },
+      { $count: "total" },
+    ]);
+
+    const totalHired = await Job.aggregate([
+      { $match: { isDeleted: false } },
+      { $unwind: "$hiredCandidates" },
+      { $count: "total" },
+    ]);
+
+    const Companies = await Company.countDocuments({
+      isDeleted: false,
+      createdAt: { $gte: oneWeekAgo },
+    });
+
+    // Employer statistics
+    const employerStats = await Employer.aggregate([
+      { $match: { isDeleted: false } },
+      { $group: { _id: "$roleType", count: { $sum: 1 } } },
+    ]);
+
+    const activeEmployers = await Employer.countDocuments({
+      isDeleted: false,
+      status: "Active",
+    });
+
+    // Job Seeker statistics
+    const jobSeekerStats = await JobSeeker.aggregate([
+      { $match: { isDeleted: false } },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]);
+
+    const activeJobSeekers = await JobSeeker.countDocuments({
+      isDeleted: false,
+      status: "Open to Work",
+    });
+
+    // Time-based trends (e.g., new users per day over the last 30 days)
+    const userTrends = await User.aggregate([
+      { $match: { isDeleted: false, createdAt: { $gte: oneMonthAgo } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { "_id": 1 } },
+    ]);
+
+    const jobTrends = await Job.aggregate([
+      { $match: { isDeleted: false, createdAt: { $gte: oneMonthAgo } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { "_id": 1 } },
+    ]);
+
+        // System health (optional: MongoDB stats, requires admin access)
+    const dbStats = await mongoose.connection.db.stats();
+    const dbSizeMB = (dbStats.dataSize / (1024 * 1024)).toFixed(2); // Convert bytes to MB
+
     res.status(200).json({
       message: "System reports retrieved successfully",
       reports: {
-        totalUsers,
-        totalJobs,
-        totalCompanies,
-        userStats: userStats.reduce((acc, stat) => ({ ...acc, [stat._id]: stat.count }), {}),
-        jobStats: jobStats.reduce((acc, stat) => ({ ...acc, [stat._id]: stat.count }), {}),
+        overview: {
+          totalUsers,
+          totalJobs,
+          totalCompanies,
+          totalEmployers,
+          totalJobSeekers,
+          dbSizeMB,
+        },
+        userMetrics: {
+          userStats: userStats.reduce((acc, stat) => ({ ...acc, [stat._id]: stat.count }), {}),
+          recentRegistrations,
+          deletedUsers,
+          userTrends: userTrends.reduce((acc, trend) => ({ ...acc, [trend._id]: trend.count }), {}),
+        },
+        jobMetrics: {
+          jobStats: jobStats.reduce((acc, stat) => ({ ...acc, [stat._id]: stat.count }), {}),
+          recentJobs,
+          totalApplications: totalApplications[0]?.total || 0,
+          recentApplications: recentApplications[0]?.total || 0,
+          totalHired: totalHired[0]?.total || 0,
+          jobTrends: jobTrends.reduce((acc, trend) => ({ ...acc, [trend._id]: trend.count }), {}),
+        },
+        companyMetrics: {
+          Companies,
+        },
+        employerMetrics: {
+          employerStats: employerStats.reduce((acc, stat) => ({ ...acc, [stat._id]: stat.count }), {}),
+          activeEmployers,
+        },
+        jobSeekerMetrics: {
+          jobSeekerStats: jobSeekerStats.reduce((acc, stat) => ({ ...acc, [stat._id]: stat.count }), {}),
+          activeJobSeekers,
+        },
       },
     });
   } catch (error) {
