@@ -103,10 +103,6 @@ exports.login = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (!userRecord.emailVerified) {
-      return res.status(403).json({ message: "Email not verified. Please verify your email to log in." });
-    }
-
     const role = userRecord.customClaims?.role || "job_seeker";
     const RoleModel = getRoleModel(role);
 
